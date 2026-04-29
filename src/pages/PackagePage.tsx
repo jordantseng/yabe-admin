@@ -128,7 +128,7 @@ function orderToPackageTableRow(row: OrderWithPackageNumber): PackageTableRow {
   };
 }
 
-/** 分組標題排序：數字編號遞增，其餘依字串，「未指定」置底。 */
+/** 分組標題排序：數字編號遞減，其餘依字串，「未指定」置底。 */
 function comparePackageGroupLabels(a: string, b: string): number {
   if (a === "未指定" && b !== "未指定") return 1;
   if (b === "未指定" && a !== "未指定") return -1;
@@ -136,7 +136,7 @@ function comparePackageGroupLabels(a: string, b: string): number {
   const nb = Number.parseInt(b, 10);
   const aNum = Number.isFinite(na) && String(na) === a;
   const bNum = Number.isFinite(nb) && String(nb) === b;
-  if (aNum && bNum) return na - nb;
+  if (aNum && bNum) return nb - na;
   if (aNum && !bNum) return -1;
   if (!aNum && bNum) return 1;
   return a.localeCompare(b, "zh-Hant");
@@ -481,6 +481,8 @@ function PackagePage() {
               setIsCreatePackageDialogOpen(open);
               if (!open) {
                 setCreatePackageError(null);
+                setNewPackageNotes("");
+                setNewPackageInternationalShippingFee("0");
               }
             }}
           >
@@ -990,6 +992,7 @@ function PackagePage() {
           if (!open) {
             setPackageToEditFee(null);
             setEditPackageFeeError(null);
+            setEditPackageFeeValue("0");
           }
         }}
       >

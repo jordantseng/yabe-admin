@@ -63,6 +63,24 @@ function paymentStatusTextClass(status: string): string {
   return "";
 }
 
+function createEmptyNewOrderDraft(): NewOrderDraft {
+  return {
+    item: "",
+    notes: "",
+    purchaseDate: new Date().toISOString().slice(0, 10),
+    buyer: "",
+    domesticDeliveryAddress: "",
+    payer: "虹",
+    cost: "0",
+    price: "0",
+    domesticShippingFee: "0",
+    revenue: "0",
+    paymentStatus: "未收款",
+    productStatus: "未購買",
+    packageNumber: "未指定",
+  };
+}
+
 function OrdersPage() {
   const [isCreateOrderDialogOpen, setIsCreateOrderDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -85,21 +103,7 @@ function OrdersPage() {
   const [bulkPackageNumber, setBulkPackageNumber] = useState("未指定");
   const queryClient = useQueryClient();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const [newOrder, setNewOrder] = useState<NewOrderDraft>({
-    item: "",
-    notes: "",
-    purchaseDate: new Date().toISOString().slice(0, 10),
-    buyer: "",
-    domesticDeliveryAddress: "",
-    payer: "虹",
-    cost: "0",
-    price: "0",
-    domesticShippingFee: "0",
-    revenue: "0",
-    paymentStatus: "未收款",
-    productStatus: "未購買",
-    packageNumber: "未指定",
-  });
+  const [newOrder, setNewOrder] = useState<NewOrderDraft>(createEmptyNewOrderDraft);
 
   const ordersQuery = useQuery({
     queryKey: [ORDERS_QUERY_KEY, listUrl],
@@ -300,21 +304,7 @@ function OrdersPage() {
       return;
     }
 
-    setNewOrder({
-      item: "",
-      notes: "",
-      purchaseDate: new Date().toISOString().slice(0, 10),
-      buyer: "",
-      domesticDeliveryAddress: "",
-      payer: "虹",
-      cost: "0",
-      price: "0",
-      domesticShippingFee: "0",
-      revenue: "0",
-      paymentStatus: "未收款",
-      productStatus: "未購買",
-      packageNumber: "未指定",
-    });
+    setNewOrder(createEmptyNewOrderDraft());
     setIsCreateOrderDialogOpen(false);
   };
 
@@ -425,6 +415,7 @@ function OrdersPage() {
               setIsCreateOrderDialogOpen(open);
               if (!open) {
                 setCreateOrderError(null);
+                setNewOrder(createEmptyNewOrderDraft());
               }
             }}
             createOrderError={createOrderError}
