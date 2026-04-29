@@ -3,12 +3,17 @@ import type { OrderRow as OrderRecord } from "@/types/database";
 
 /** Order row from `select('*, packages(number)')`. */
 export type OrderWithPackageNumber = OrderRecord & {
-  packages: { number: number; international_shipping_fee?: number } | null;
+  packages: {
+    number: number;
+    international_shipping_fee?: number;
+    notes?: string | null;
+  } | null;
 };
 
 export type OrdersTableRow = {
   id: string;
   item: string;
+  notes: string;
   purchaseDate: string;
   buyer: string;
   payer: OrderRecord["payer"];
@@ -23,6 +28,7 @@ export type OrdersTableRow = {
 
 export type OrderDetailFormValues = {
   item: string;
+  notes: string;
   purchaseDate: string;
   buyer: string;
   domesticDeliveryAddress: string;
@@ -63,6 +69,7 @@ export function orderRecordToTableRow(row: OrderRecord): OrdersTableRow {
   return {
     id: row.id,
     item: row.item,
+    notes: row.notes ?? "",
     purchaseDate: purchaseDateFromRecord(row.purchase_date),
     buyer: row.buyer,
     payer: row.payer,
@@ -79,6 +86,7 @@ export function orderRecordToTableRow(row: OrderRecord): OrdersTableRow {
 export function orderRecordToDetailForm(row: OrderRecord): OrderDetailFormValues {
   return {
     item: row.item,
+    notes: row.notes ?? "",
     purchaseDate: purchaseDateFromRecord(row.purchase_date),
     buyer: row.buyer,
     domesticDeliveryAddress: row.domestic_delivery_address ?? "",
@@ -152,6 +160,7 @@ export async function fetchOrdersTotals(
 
 export type CreateOrderInput = {
   item: string;
+  notes?: string;
   purchaseDate: string;
   buyer: string;
   domesticDeliveryAddress: string;
@@ -176,6 +185,7 @@ export async function createOrder(input: CreateOrderInput): Promise<{
     .from("orders")
     .insert({
       item: input.item.trim(),
+      notes: input.notes?.trim() || null,
       purchase_date: purchaseDate,
       buyer: input.buyer.trim(),
       domestic_delivery_address: input.domesticDeliveryAddress.trim(),
@@ -264,7 +274,7 @@ export async function fetchOrdersForPackagePage(
 
   let query = supabase
     .from("orders")
-    .select("*, packages(number, international_shipping_fee)")
+    .select("*, packages(number, international_shipping_fee, notes)")
     .order("purchase_date", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(PACKAGE_PAGE_LIMIT);
@@ -389,6 +399,7 @@ export async function updateOrderFromDetailForm(
     .from("orders")
     .update({
       item: values.item.trim(),
+      notes: values.notes.trim() || null,
       purchase_date: purchaseDate,
       buyer: values.buyer.trim(),
       domestic_delivery_address: values.domesticDeliveryAddress.trim(),

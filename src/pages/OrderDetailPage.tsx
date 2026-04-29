@@ -30,6 +30,7 @@ function paymentStatusTextClass(status: string): string {
 function emptyOrderDetailForm(): OrderDetailFormValues {
   return {
     item: "",
+    notes: "",
     purchaseDate: new Date().toISOString().slice(0, 10),
     buyer: "",
     domesticDeliveryAddress: "",
@@ -219,6 +220,13 @@ function OrderDetailPage() {
               />
             </Field>
 
+            <Field label="備註">
+              <input
+                {...register("notes")}
+                className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
+              />
+            </Field>
+
             <Field label="地址">
               <input
                 {...register("domesticDeliveryAddress")}
@@ -314,7 +322,7 @@ function OrderDetailPage() {
                 render={({ field }) => (
                   <Select
                     value={field.value}
-                    onValueChange={(value) => {
+                    onValueChange={(value)=> {
                       if (value) field.onChange(value);
                     }}
                   >

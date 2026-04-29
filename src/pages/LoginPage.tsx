@@ -80,7 +80,7 @@ function LoginPage() {
         </form>
 
         <p className="text-center text-xs text-muted-foreground">
-          需在 Supabase 專案啟用 Email 登入並建立使用者（Authentication → Providers）。
+          需在 Supabase 專案啟用 Email 登入並新增使用者（Authentication → Providers）。
         </p>
       </div>
       <Link to="/orders" className="text-sm text-muted-foreground underline-offset-4 hover:underline">

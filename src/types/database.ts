@@ -4,6 +4,7 @@
  * - 20260515120000_packages_and_order_links.sql
  * - 20260429154500_drop_orders_revenue.sql
  * - 20260429160000_add_shipping_fees.sql
+ * - 20260429193000_add_order_notes.sql
  */
 
 export type PackageStatus =
@@ -55,6 +56,7 @@ export type OrderRow = {
   cost: number;
   price: number;
   domestic_shipping_fee: number;
+  notes: string | null;
   payment_status: OrderPaymentStatus;
   product_status: OrderProductStatus;
   /** Legacy; prefer package_id + join packages.number. */

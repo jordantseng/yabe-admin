@@ -2,7 +2,7 @@
 -- 過渡期仍保留 orders.package_number（文字）；新流程請使用 orders.package_id 對應 packages.id，
 -- 顯示給使用者看 packages.number。
 --
--- 前置條件：必須先執行 20260429120000_create_orders.sql（建立 public.orders 與 set_orders_updated_at）。
+-- 前置條件：必須先執行 20260429120000_create_orders.sql（新增 public.orders 與 set_orders_updated_at）。
 -- 若單獨貼上本檔會出現 relation "public.orders" does not exist。
 
 create table if not exists public.packages (

@@ -60,12 +60,16 @@ import type { OrderProductStatus } from "@/types/database";
 const PACKAGE_PAGE_SIZE = 15;
 const PACKAGE_ROWS_QUERY_KEY = ["packages", "page-rows"] as const;
 const PACKAGE_NUMBERS_QUERY_KEY = ["packages", "numbers"] as const;
+const EMPTY_PACKAGE_ROWS: PackageTableRow[] = [];
+const EMPTY_PACKAGE_NUMBERS: string[] = [];
 
 /** 包裹列表列（由訂單 + 關聯包裹映射）。 */
 export type PackageTableRow = {
   id: string;
   packageNumber: string;
+  packageNotes: string;
   item: string;
+  orderNotes: string;
   purchaseDate: string;
   buyer: string;
   address: string;
@@ -103,20 +107,22 @@ function displayPackageNumber(row: OrderWithPackageNumber): string {
 }
 
 function orderToPackageTableRow(row: OrderWithPackageNumber): PackageTableRow {
+  const packageRel = row.packages as
+    | { international_shipping_fee?: number; notes?: string | null }
+    | null;
   return {
     id: row.id,
     packageNumber: displayPackageNumber(row),
+    packageNotes: packageRel?.notes?.trim() ?? "",
     item: row.item,
+    orderNotes: row.notes ?? "",
     purchaseDate: purchaseDateSlice(row.purchase_date),
     buyer: row.buyer,
     address: row.domestic_delivery_address ?? "",
     cost: String(row.cost),
     price: String(row.price),
     domesticShippingFee: String(row.domestic_shipping_fee),
-    internationalShippingFee: String(
-      ((row.packages as { international_shipping_fee?: number } | null)
-        ?.international_shipping_fee ?? 0),
-    ),
+    internationalShippingFee: String(packageRel?.international_shipping_fee ?? 0),
     revenue: revenueStringFromCostPrice(row.cost, row.price),
     productStatus: row.product_status,
   };
@@ -277,8 +283,8 @@ function PackagePage() {
       page: 1,
     });
   };
-  const rows = rowsQuery.data?.rows ?? [];
-  const packageNumberOptions = packageNumbersQuery.data ?? [];
+  const rows = rowsQuery.data?.rows ?? EMPTY_PACKAGE_ROWS;
+  const packageNumberOptions = packageNumbersQuery.data ?? EMPTY_PACKAGE_NUMBERS;
   const rowsLoading = rowsQuery.isLoading;
   const rowsError = (rowsQuery.error as Error | null)?.message ?? null;
 
@@ -392,7 +398,7 @@ function PackagePage() {
       return;
     }
     if (!data) {
-      setCreatePackageError("建立失敗");
+      setCreatePackageError("新增失敗");
       return;
     }
     setNewPackageNotes("");
@@ -479,11 +485,11 @@ function PackagePage() {
             }}
           >
             <DialogTrigger
-              render={<Button type="button">建立包裹編號</Button>}
+              render={<Button type="button">新增包裹編號</Button>}
             />
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>建立包裹編號</DialogTitle>
+                <DialogTitle>新增包裹編號</DialogTitle>
                 <DialogDescription>
                   編號由資料庫自動遞增（1、2、3…）。可填選填備註。
                 </DialogDescription>
@@ -494,22 +500,27 @@ function PackagePage() {
                 </p>
               )}
               <div className="py-2">
-                <Input
-                  value={newPackageNotes}
-                  onChange={(event) => setNewPackageNotes(event.target.value)}
-                  placeholder="備註（選填）"
-                  aria-label="包裹備註"
-                />
-                <Input
-                  className="mt-2"
-                  type="number"
-                  value={newPackageInternationalShippingFee}
-                  onChange={(event) =>
-                    setNewPackageInternationalShippingFee(event.target.value)
-                  }
-                  placeholder="國際運費"
-                  aria-label="國際運費"
-                />
+                <div className="space-y-1">
+                  <label className="text-sm font-medium">備註</label>
+                  <Input
+                    value={newPackageNotes}
+                    onChange={(event) => setNewPackageNotes(event.target.value)}
+                    placeholder="備註（選填）"
+                    aria-label="包裹備註"
+                  />
+                </div>
+                <div className="mt-2 space-y-1">
+                  <label className="text-sm font-medium">國際運費</label>
+                  <Input
+                    type="number"
+                    value={newPackageInternationalShippingFee}
+                    onChange={(event) =>
+                      setNewPackageInternationalShippingFee(event.target.value)
+                    }
+                    placeholder="國際運費"
+                    aria-label="國際運費"
+                  />
+                </div>
               </div>
               <DialogFooter>
                 <DialogClose render={<Button variant="outline">取消</Button>} />
@@ -518,7 +529,7 @@ function PackagePage() {
                   onClick={() => void handleCreatePackage()}
                   disabled={createPackageMutation.isPending}
                 >
-                  {createPackageMutation.isPending ? "建立中…" : "建立"}
+                  {createPackageMutation.isPending ? "新增中…" : "新增"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -538,7 +549,7 @@ function PackagePage() {
                 applySearch();
               }
             }}
-            placeholder="搜尋品項（按 Enter）"
+            placeholder="搜尋品項"
             aria-label="搜尋品項，按 Enter 查詢"
             className="w-full max-w-sm"
           />
@@ -648,6 +659,7 @@ function PackagePage() {
             <TableRow>
               <TableHead>包裹編號</TableHead>
               <TableHead className="min-w-48">品項</TableHead>
+              <TableHead className="min-w-48">備註</TableHead>
               <TableHead>購買日期</TableHead>
               <TableHead>購買人</TableHead>
               <TableHead className="min-w-48">地址</TableHead>
@@ -668,6 +680,9 @@ function PackagePage() {
                   </TableCell>
                   <TableCell>
                     <Skeleton className="h-4 w-44" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-40" />
                   </TableCell>
                   <TableCell>
                     <Skeleton className="h-4 w-24" />
@@ -701,7 +716,7 @@ function PackagePage() {
             ) : rowsError ? (
               <TableRow>
                 <TableCell
-                  colSpan={11}
+                  colSpan={12}
                   className="h-24 text-center text-sm text-muted-foreground"
                 >
                   無法載入列表，請見上方錯誤說明。
@@ -710,7 +725,7 @@ function PackagePage() {
             ) : rows.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={11}
+                  colSpan={12}
                   className="h-24 text-center text-sm text-muted-foreground"
                 >
                   {listUrl.q.trim() !== ""
@@ -725,12 +740,12 @@ function PackagePage() {
                 <Fragment key={group.label}>
                   <TableRow className="bg-muted/60 hover:bg-muted/60">
                     <TableCell
-                      colSpan={10}
+                      colSpan={11}
                       className="py-3 text-sm font-semibold tracking-tight"
                     >
                       {group.label === "未指定"
                         ? "未指派包裹"
-                        : `包裹編號 ${group.label}`}
+                        : `包裹${group.label}`}
                       <span className="ml-2 font-normal text-muted-foreground">
                         （{group.rows.length} 筆訂單）
                       </span>
@@ -739,13 +754,19 @@ function PackagePage() {
                           國際運費: {group.rows[0]?.internationalShippingFee ?? "0"}
                         </span>
                       )}
+                      {group.label !== "未指定" &&
+                        (group.rows[0]?.packageNotes ?? "") !== "" && (
+                          <span className="ml-3 font-normal text-muted-foreground">
+                            備註: {group.rows[0]?.packageNotes}
+                          </span>
+                        )}
                     </TableCell>
                     <TableCell className="py-3 space-x-2">
                       {group.label !== "未指定" && (
                         <Button
                           type="button"
                           variant="outline"
-                          size="sm"
+                          className="h-8 px-3"
                           onClick={() =>
                             openEditPackageFeeDialog(
                               group.label,
@@ -794,6 +815,9 @@ function PackagePage() {
                       </TableCell>
                       <TableCell className="max-w-56 text-sm text-muted-foreground">
                         {row.item}
+                      </TableCell>
+                      <TableCell className="max-w-56 text-sm text-muted-foreground">
+                        {row.orderNotes}
                       </TableCell>
                       <TableCell className="tabular-nums">
                         {row.purchaseDate}

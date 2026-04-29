@@ -54,10 +54,10 @@ export function CreateOrderDialog({
 }: CreateOrderDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogTrigger render={<Button type="button">建立新訂單</Button>} />
+      <DialogTrigger render={<Button type="button">新增新訂單</Button>} />
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>建立新訂單</DialogTitle>
+          <DialogTitle>新增新訂單</DialogTitle>
           <DialogDescription>請填寫訂單資訊。</DialogDescription>
         </DialogHeader>
         {createOrderError && (
@@ -101,6 +101,23 @@ export function CreateOrderDialog({
                     }))
                   }
                   aria-label="購買日期"
+                />
+              </div>
+              <div className="space-y-1 md:col-span-2">
+                <label htmlFor="new-order-notes" className="text-sm font-medium">
+                  備註
+                </label>
+                <Input
+                  id="new-order-notes"
+                  value={newOrder.notes}
+                  onChange={(event) =>
+                    setNewOrder((current) => ({
+                      ...current,
+                      notes: event.target.value,
+                    }))
+                  }
+                  placeholder="備註（選填）"
+                  aria-label="備註"
                 />
               </div>
               <div className="space-y-1">
@@ -326,7 +343,7 @@ export function CreateOrderDialog({
             onClick={onCreate}
             disabled={!newOrder.item.trim() || !newOrder.buyer.trim() || isSubmitting}
           >
-            {isSubmitting ? "建立中…" : "建立訂單"}
+            {isSubmitting ? "新增中…" : "新增訂單"}
           </Button>
         </DialogFooter>
       </DialogContent>
