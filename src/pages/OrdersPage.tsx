@@ -1,4 +1,5 @@
-import { startTransition, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowUpDownIcon,
   EyeIcon,
@@ -8,17 +9,12 @@ import {
 } from "lucide-react";
 import { useQueryStates } from "nuqs";
 import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogClose,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+  CreateOrderDialog,
+  type NewOrderDraft,
+} from "@/components/orders/CreateOrderDialog";
+import { DeleteOrderDialog } from "@/components/orders/DeleteOrderDialog";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -48,53 +44,47 @@ import {
   fetchOrdersTotals,
   orderRecordToTableRow,
   updateOrderFields,
-  type OrdersTableRow as OrderRow,
 } from "@/lib/orders";
 import {
   ordersListSearchParams,
   type OrdersListUrlState,
 } from "@/lib/orders-list-url";
 import { fetchPackageNumbersFromDb } from "@/lib/packages";
-import { PACKAGE_NUMBER_OPTIONS_CHANGED_EVENT } from "@/lib/package-number-options";
 
 const ORDERS_PAGE_SIZE = 15;
+const ORDERS_QUERY_KEY = ["orders", "list"] as const;
+const ORDERS_TOTALS_QUERY_KEY = ["orders", "totals"] as const;
+const PACKAGE_NUMBERS_QUERY_KEY = ["packages", "numbers"] as const;
 
-type NewOrderDraft = Omit<OrderRow, "id"> & {
-  domesticDeliveryAddress: string;
-};
+function paymentStatusTextClass(status: string): string {
+  if (status === "未收款") return "text-red-500";
+  if (status === "已收款") return "text-amber-500";
+  if (status === "已入帳") return "text-green-500";
+  return "";
+}
 
 function OrdersPage() {
   const [isCreateOrderDialogOpen, setIsCreateOrderDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [orderToDeleteId, setOrderToDeleteId] = useState<string | null>(null);
-  const [packageNumberOptions, setPackageNumberOptions] = useState<string[]>(
-    []
-  );
   const [listUrl, setListUrl] = useQueryStates(ordersListSearchParams, {
     history: "push",
   });
-  const [refreshKey, setRefreshKey] = useState(0);
   const [draftFilterPaymentStatus, setDraftFilterPaymentStatus] =
     useState<OrdersListUrlState["payment"]>("全部");
   const [draftFilterProductStatus, setDraftFilterProductStatus] =
     useState<OrdersListUrlState["product"]>("全部");
   const [draftFilterPackageNumber, setDraftFilterPackageNumber] =
     useState<string>("全部");
-  const [orders, setOrders] = useState<OrderRow[]>([]);
-  const [totalRowCount, setTotalRowCount] = useState(0);
-  const [aggregateTotalCost, setAggregateTotalCost] = useState(0);
-  const [aggregateTotalProfit, setAggregateTotalProfit] = useState(0);
-  const [ordersLoading, setOrdersLoading] = useState(true);
-  const [ordersError, setOrdersError] = useState<string | null>(null);
+  const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
   const [listFieldError, setListFieldError] = useState<string | null>(null);
   const [createOrderError, setCreateOrderError] = useState<string | null>(null);
-  const [isCreateOrderSubmitting, setIsCreateOrderSubmitting] = useState(false);
   const [deleteOrderError, setDeleteOrderError] = useState<string | null>(null);
-  const [isDeleteOrderSubmitting, setIsDeleteOrderSubmitting] = useState(false);
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
   const [isMoveToPopoverOpen, setIsMoveToPopoverOpen] = useState(false);
-  const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
   const [bulkPackageNumber, setBulkPackageNumber] = useState("未指定");
+  const queryClient = useQueryClient();
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [newOrder, setNewOrder] = useState<NewOrderDraft>({
     item: "",
     purchaseDate: new Date().toISOString().slice(0, 10),
@@ -110,6 +100,65 @@ function OrdersPage() {
     packageNumber: "未指定",
   });
 
+  const ordersQuery = useQuery({
+    queryKey: [ORDERS_QUERY_KEY, listUrl],
+    queryFn: async () => {
+      const res = await fetchOrders({
+        itemSearch: listUrl.q || undefined,
+        paymentStatus: listUrl.payment,
+        productStatus: listUrl.product,
+        packageNumber: listUrl.pkg,
+        sortPurchaseDate: listUrl.sort,
+        page: listUrl.page,
+        pageSize: ORDERS_PAGE_SIZE,
+      });
+      if (res.error) {
+        throw new Error(res.error.message);
+      }
+      return {
+        rows: (res.data ?? []).map(orderRecordToTableRow),
+        count: res.count,
+      };
+    },
+  });
+
+  const totalsQuery = useQuery({
+    queryKey: [
+      ORDERS_TOTALS_QUERY_KEY,
+      listUrl.q,
+      listUrl.payment,
+      listUrl.product,
+      listUrl.pkg,
+    ],
+    queryFn: async () => {
+      const res = await fetchOrdersTotals({
+        itemSearch: listUrl.q || undefined,
+        paymentStatus: listUrl.payment,
+        productStatus: listUrl.product,
+        packageNumber: listUrl.pkg,
+      });
+      if (res.error) {
+        throw new Error(res.error.message);
+      }
+      return { totalCost: res.totalCost, totalProfit: res.totalProfit };
+    },
+  });
+
+  const packageNumbersQuery = useQuery({
+    queryKey: PACKAGE_NUMBERS_QUERY_KEY,
+    queryFn: async () => {
+      const res = await fetchPackageNumbersFromDb();
+      if (res.error) {
+        throw new Error(res.error.message);
+      }
+      return res.data ?? [];
+    },
+  });
+
+  const invalidateOrdersData = () => {
+    void queryClient.invalidateQueries({ queryKey: [ORDERS_QUERY_KEY] });
+    void queryClient.invalidateQueries({ queryKey: [ORDERS_TOTALS_QUERY_KEY] });
+  };
   const patchListUrl = useCallback(
     (patch: Partial<OrdersListUrlState>, opts?: { replace?: boolean }) => {
       void setListUrl(patch, {
@@ -119,102 +168,54 @@ function OrdersPage() {
     [setListUrl]
   );
 
-  const reloadOrdersList = useCallback(() => {
-    setRefreshKey((k) => k + 1);
-  }, []);
+  const persistFieldMutation = useMutation({
+    mutationFn: async ({
+      orderId,
+      patch,
+    }: {
+      orderId: string;
+      patch: Parameters<typeof updateOrderFields>[1];
+    }) => {
+      const { error } = await updateOrderFields(orderId, patch);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => {
+      invalidateOrdersData();
+    },
+    onError: (error) => {
+      setListFieldError(error.message);
+    },
+  });
 
-  const { q, payment, product, pkg, sort, page } = listUrl;
+  const createOrderMutation = useMutation({
+    mutationFn: createOrder,
+    onSuccess: () => {
+      invalidateOrdersData();
+    },
+    onError: (error) => {
+      setCreateOrderError(error.message);
+    },
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-    const state = { q, payment, product, pkg, sort, page };
-
-    startTransition(() => {
-      setOrdersError(null);
-      setOrdersLoading(true);
-    });
-
-    const listQueryFilter = {
-      itemSearch: state.q || undefined,
-      paymentStatus: state.payment,
-      productStatus: state.product,
-      packageNumber: state.pkg,
-    };
-
-    void (async () => {
-      const [ordersRes, totalsRes] = await Promise.all([
-        fetchOrders({
-          ...listQueryFilter,
-          sortPurchaseDate: state.sort,
-          page: state.page,
-          pageSize: ORDERS_PAGE_SIZE,
-        }),
-        fetchOrdersTotals(listQueryFilter),
-      ]);
-
-      if (cancelled) {
-        return;
-      }
-
-      startTransition(() => {
-        setOrdersLoading(false);
-        if (ordersRes.error) {
-          setOrdersError(ordersRes.error.message);
-          return;
-        }
-        if (totalsRes.error) {
-          setOrdersError(totalsRes.error.message);
-          return;
-        }
-        setOrders((ordersRes.data ?? []).map(orderRecordToTableRow));
-        setTotalRowCount(ordersRes.count);
-        setAggregateTotalCost(totalsRes.totalCost);
-        setAggregateTotalProfit(totalsRes.totalProfit);
-        const totalPages = Math.max(
-          1,
-          Math.ceil(ordersRes.count / ORDERS_PAGE_SIZE)
-        );
-        const nextPage = Math.min(state.page, totalPages);
-        if (nextPage !== state.page) {
-          void setListUrl({ page: nextPage }, { history: "replace" });
-        }
-      });
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [q, payment, product, pkg, sort, page, refreshKey, setListUrl]);
-
-  useEffect(() => {
-    const refresh = () => {
-      void (async () => {
-        const res = await fetchPackageNumbersFromDb();
-        if (!res.error && res.data) {
-          startTransition(() => {
-            setPackageNumberOptions(res.data ?? []);
-          });
-        }
-      })();
-    };
-    refresh();
-    window.addEventListener(PACKAGE_NUMBER_OPTIONS_CHANGED_EVENT, refresh);
-    return () => {
-      window.removeEventListener(PACKAGE_NUMBER_OPTIONS_CHANGED_EVENT, refresh);
-    };
-  }, []);
+  const deleteOrderMutation = useMutation({
+    mutationFn: async (orderId: string) => {
+      const { error } = await deleteOrderById(orderId);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => {
+      invalidateOrdersData();
+    },
+    onError: (error) => {
+      setDeleteOrderError(error.message);
+    },
+  });
 
   const persistListPatch = async (
     orderId: string,
     patch: Parameters<typeof updateOrderFields>[1]
   ) => {
     setListFieldError(null);
-    const { error } = await updateOrderFields(orderId, patch);
-    if (error) {
-      setListFieldError(error.message);
-      return;
-    }
-    reloadOrdersList();
+    await persistFieldMutation.mutateAsync({ orderId, patch });
   };
 
   const handlePackageNumberChange = (orderId: string, value: string | null) => {
@@ -222,20 +223,10 @@ function OrdersPage() {
       void persistListPatch(orderId, { packageNumber: value });
     }
   };
-  const handleFilterPaymentStatusChange = (value: string | null) => {
-    if (value) {
-      setDraftFilterPaymentStatus(value as OrdersListUrlState["payment"]);
-    }
-  };
-  const handleFilterProductStatusChange = (value: string | null) => {
-    if (value) {
-      setDraftFilterProductStatus(value as OrdersListUrlState["product"]);
-    }
-  };
-  const handleFilterPackageNumberChange = (value: string | null) => {
-    if (value) {
-      setDraftFilterPackageNumber(value);
-    }
+  const openDeleteDialog = (orderId: string) => {
+    setDeleteOrderError(null);
+    setOrderToDeleteId(orderId);
+    setIsDeleteDialogOpen(true);
   };
   const handleFilterPopoverOpenChange = (open: boolean) => {
     setIsFilterPopoverOpen(open);
@@ -254,24 +245,23 @@ function OrdersPage() {
     });
     setIsFilterPopoverOpen(false);
   };
-  const openDeleteDialog = (orderId: string) => {
-    setDeleteOrderError(null);
-    setOrderToDeleteId(orderId);
-    setIsDeleteDialogOpen(true);
+  const applySearch = () => {
+    patchListUrl({
+      q: (searchInputRef.current?.value ?? "").trim(),
+      page: 1,
+    });
   };
   const confirmDeleteOrder = async () => {
     if (!orderToDeleteId) return;
     setDeleteOrderError(null);
-    setIsDeleteOrderSubmitting(true);
-    const { error } = await deleteOrderById(orderToDeleteId);
-    setIsDeleteOrderSubmitting(false);
-    if (error) {
-      setDeleteOrderError(error.message);
+    try {
+      await deleteOrderMutation.mutateAsync(orderToDeleteId);
+    } catch (error) {
+      setDeleteOrderError((error as Error).message);
       return;
     }
     setOrderToDeleteId(null);
     setIsDeleteDialogOpen(false);
-    reloadOrdersList();
   };
 
   const handleCreateOrder = async () => {
@@ -283,11 +273,12 @@ function OrdersPage() {
 
     const costNumber = Number.parseFloat(newOrder.cost);
     const priceNumber = Number.parseFloat(newOrder.price);
-    const domesticShippingFeeNumber = Number.parseFloat(newOrder.domesticShippingFee);
+    const domesticShippingFeeNumber = Number.parseFloat(
+      newOrder.domesticShippingFee
+    );
 
     setCreateOrderError(null);
-    setIsCreateOrderSubmitting(true);
-    const { error } = await createOrder({
+    const createResult = await createOrderMutation.mutateAsync({
       item,
       purchaseDate: newOrder.purchaseDate,
       buyer,
@@ -302,9 +293,8 @@ function OrdersPage() {
       productStatus: newOrder.productStatus,
       packageNumber: newOrder.packageNumber,
     });
-    setIsCreateOrderSubmitting(false);
-    if (error) {
-      setCreateOrderError(error.message);
+    if (createResult.error) {
+      setCreateOrderError(createResult.error.message);
       return;
     }
 
@@ -323,16 +313,29 @@ function OrdersPage() {
       packageNumber: "未指定",
     });
     setIsCreateOrderDialogOpen(false);
-    patchListUrl({ page: 1 });
-    reloadOrdersList();
   };
+
+  const orders = ordersQuery.data?.rows ?? [];
+  const packageNumberOptions = packageNumbersQuery.data ?? [];
+  const totalRowCount = ordersQuery.data?.count ?? 0;
+  const totalCost = totalsQuery.data?.totalCost ?? 0;
+  const totalProfit = totalsQuery.data?.totalProfit ?? 0;
+  const ordersLoading = ordersQuery.isLoading || totalsQuery.isLoading;
+  const ordersError =
+    (ordersQuery.error as Error | null)?.message ??
+    (totalsQuery.error as Error | null)?.message ??
+    null;
 
   const totalPages = Math.max(1, Math.ceil(totalRowCount / ORDERS_PAGE_SIZE));
   const safeCurrentPage = Math.min(listUrl.page, totalPages);
-  const paginatedOrders = orders;
-  const paginatedOrderIds = paginatedOrders.map((order) => order.id);
-  const totalCost = aggregateTotalCost;
-  const totalProfit = aggregateTotalProfit;
+  useEffect(() => {
+    if (safeCurrentPage !== listUrl.page) {
+      patchListUrl({ page: safeCurrentPage }, { replace: true });
+    }
+  }, [listUrl.page, patchListUrl, safeCurrentPage]);
+
+  const filterPackageSelectValues = ["全部", ...packageNumberOptions];
+  const paginatedOrderIds = orders.map((order) => order.id);
   const isAllCurrentPageSelected =
     paginatedOrderIds.length > 0 &&
     paginatedOrderIds.every((orderId) => selectedOrderIds.includes(orderId));
@@ -378,7 +381,7 @@ function OrdersPage() {
     }
     setSelectedOrderIds([]);
     setIsMoveToPopoverOpen(false);
-    reloadOrdersList();
+    invalidateOrdersData();
   };
 
   return (
@@ -395,7 +398,7 @@ function OrdersPage() {
             variant="outline"
             size="sm"
             className="mt-2"
-            onClick={() => reloadOrdersList()}
+            onClick={() => invalidateOrdersData()}
           >
             重試
           </Button>
@@ -413,7 +416,7 @@ function OrdersPage() {
       <div className="mb-4 flex items-center justify-between gap-2">
         <h1 className="text-xl font-semibold">訂單管理</h1>
         <div className="flex items-center gap-2">
-          <Dialog
+          <CreateOrderDialog
             open={isCreateOrderDialogOpen}
             onOpenChange={(open) => {
               setIsCreateOrderDialogOpen(open);
@@ -421,348 +424,54 @@ function OrdersPage() {
                 setCreateOrderError(null);
               }
             }}
-          >
-            <DialogTrigger render={<Button type="button">建立新訂單</Button>} />
-            <DialogContent className="max-w-xl">
-              <DialogHeader>
-                <DialogTitle>建立新訂單</DialogTitle>
-                <DialogDescription>請填寫訂單資訊。</DialogDescription>
-              </DialogHeader>
-              {createOrderError && (
-                <p className="text-sm text-destructive" role="alert">
-                  {createOrderError}
-                </p>
-              )}
-              <div className="space-y-4 py-2">
-                <section className="space-y-3 rounded-md border p-3">
-                  <p className="text-xs font-semibold text-muted-foreground">
-                    基本資料
-                  </p>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-1">
-                      <label
-                        htmlFor="new-order-item"
-                        className="text-sm font-medium"
-                      >
-                        品項
-                      </label>
-                      <Input
-                        id="new-order-item"
-                        value={newOrder.item}
-                        onChange={(event) =>
-                          setNewOrder((current) => ({
-                            ...current,
-                            item: event.target.value,
-                          }))
-                        }
-                        placeholder="品項"
-                        aria-label="品項"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label
-                        htmlFor="new-order-purchase-date"
-                        className="text-sm font-medium"
-                      >
-                        購買日期
-                      </label>
-                      <Input
-                        id="new-order-purchase-date"
-                        type="date"
-                        value={newOrder.purchaseDate}
-                        onChange={(event) =>
-                          setNewOrder((current) => ({
-                            ...current,
-                            purchaseDate: event.target.value,
-                          }))
-                        }
-                        aria-label="購買日期"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label
-                        htmlFor="new-order-buyer"
-                        className="text-sm font-medium"
-                      >
-                        購買人
-                      </label>
-                      <Input
-                        id="new-order-buyer"
-                        value={newOrder.buyer}
-                        onChange={(event) =>
-                          setNewOrder((current) => ({
-                            ...current,
-                            buyer: event.target.value,
-                          }))
-                        }
-                        placeholder="購買人"
-                        aria-label="購買人"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium">付款人</label>
-                      <Select
-                        value={newOrder.payer}
-                        onValueChange={(value) => {
-                          if (value === "虹" || value === "藍") {
-                            setNewOrder((current) => ({
-                              ...current,
-                              payer: value,
-                            }));
-                          }
-                        }}
-                      >
-                        <SelectTrigger aria-label="付款人">
-                          <SelectValue placeholder="付款人" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="虹">虹</SelectItem>
-                          <SelectItem value="藍">藍</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1 md:col-span-2">
-                      <label
-                        htmlFor="new-order-address"
-                        className="text-sm font-medium"
-                      >
-                        地址
-                      </label>
-                      <Input
-                        id="new-order-address"
-                        value={newOrder.domesticDeliveryAddress}
-                        onChange={(event) =>
-                          setNewOrder((current) => ({
-                            ...current,
-                            domesticDeliveryAddress: event.target.value,
-                          }))
-                        }
-                        placeholder="地址"
-                        aria-label="地址"
-                      />
-                    </div>
-                  </div>
-                </section>
-
-                <section className="space-y-3 rounded-md border p-3">
-                  <p className="text-xs font-semibold text-muted-foreground">
-                    金額資訊
-                  </p>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <div className="space-y-1">
-                      <label
-                        htmlFor="new-order-cost"
-                        className="text-sm font-medium"
-                      >
-                        成本
-                      </label>
-                      <Input
-                        id="new-order-cost"
-                        type="number"
-                        value={newOrder.cost}
-                        onChange={(event) =>
-                          setNewOrder((current) => ({
-                            ...current,
-                            cost: event.target.value,
-                          }))
-                        }
-                        placeholder="成本"
-                        aria-label="成本"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label
-                        htmlFor="new-order-price"
-                        className="text-sm font-medium"
-                      >
-                        售價
-                      </label>
-                      <Input
-                        id="new-order-price"
-                        type="number"
-                        value={newOrder.price}
-                        onChange={(event) =>
-                          setNewOrder((current) => ({
-                            ...current,
-                            price: event.target.value,
-                          }))
-                        }
-                        placeholder="售價"
-                        aria-label="售價"
-                      />
-                    </div>
-                    <div className="space-y-1">
-                      <label
-                        htmlFor="new-order-domestic-shipping-fee"
-                        className="text-sm font-medium"
-                      >
-                        店到店運費
-                      </label>
-                      <Input
-                        id="new-order-domestic-shipping-fee"
-                        type="number"
-                        value={newOrder.domesticShippingFee}
-                        onChange={(event) =>
-                          setNewOrder((current) => ({
-                            ...current,
-                            domesticShippingFee: event.target.value,
-                          }))
-                        }
-                        placeholder="店到店運費"
-                        aria-label="店到店運費"
-                      />
-                    </div>
-                  </div>
-                </section>
-
-                <section className="space-y-3 rounded-md border p-3">
-                  <p className="text-xs font-semibold text-muted-foreground">
-                    訂單狀態
-                  </p>
-                  <div className="grid gap-3 md:grid-cols-3">
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium">收款狀態</label>
-                      <Select
-                        value={newOrder.paymentStatus}
-                        onValueChange={(value) => {
-                          if (
-                            value === "未收款" ||
-                            value === "已收款" ||
-                            value === "已入帳"
-                          ) {
-                            setNewOrder((current) => ({
-                              ...current,
-                              paymentStatus: value,
-                            }));
-                          }
-                        }}
-                      >
-                        <SelectTrigger aria-label="收款狀態">
-                          <SelectValue placeholder="收款狀態" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="未收款">未收款</SelectItem>
-                          <SelectItem value="已收款">已收款</SelectItem>
-                          <SelectItem value="已入帳">已入帳</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium">商品狀態</label>
-                      <Select
-                        value={newOrder.productStatus}
-                        onValueChange={(value) => {
-                          if (
-                            value === "未購買" ||
-                            value === "已購賣" ||
-                            value === "到虹家" ||
-                            value === "集運回台" ||
-                            value === "到台灣" ||
-                            value === "已出貨"
-                          ) {
-                            setNewOrder((current) => ({
-                              ...current,
-                              productStatus: value,
-                            }));
-                          }
-                        }}
-                      >
-                        <SelectTrigger aria-label="商品狀態">
-                          <SelectValue placeholder="商品狀態" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="未購買">未購買</SelectItem>
-                          <SelectItem value="已購賣">已購賣</SelectItem>
-                          <SelectItem value="到虹家">到虹家</SelectItem>
-                          <SelectItem value="集運回台">集運回台</SelectItem>
-                          <SelectItem value="到台灣">到台灣</SelectItem>
-                          <SelectItem value="已出貨">已出貨</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1">
-                      <label className="text-sm font-medium">包裹編號</label>
-                      <Select
-                        value={newOrder.packageNumber}
-                        onValueChange={(value) => {
-                          if (value) {
-                            setNewOrder((current) => ({
-                              ...current,
-                              packageNumber: value,
-                            }));
-                          }
-                        }}
-                      >
-                        <SelectTrigger aria-label="包裹編號">
-                          <SelectValue placeholder="包裹編號" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="未指定">未指定</SelectItem>
-                          {packageNumberOptions.map((packageNumber) => (
-                            <SelectItem key={packageNumber} value={packageNumber}>
-                              {packageNumber}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </section>
-              </div>
-              <DialogFooter>
-                <DialogClose render={<Button variant="outline">取消</Button>} />
-                <Button
-                  type="button"
-                  onClick={() => void handleCreateOrder()}
-                  disabled={
-                    !newOrder.item.trim() ||
-                    !newOrder.buyer.trim() ||
-                    isCreateOrderSubmitting
-                  }
-                >
-                  {isCreateOrderSubmitting ? "建立中…" : "建立訂單"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
+            createOrderError={createOrderError}
+            isSubmitting={createOrderMutation.isPending}
+            newOrder={newOrder}
+            setNewOrder={setNewOrder}
+            packageNumberOptions={packageNumberOptions}
+            onCreate={() => void handleCreateOrder()}
+          />
         </div>
       </div>
 
-      <div className="mb-4 flex items-center gap-2">
-        <Input
-          key={listUrl.q}
-          defaultValue={listUrl.q}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              patchListUrl({
-                q: event.currentTarget.value.trim(),
-                page: 1,
-              });
-            }
-          }}
-          placeholder="搜尋品項（按 Enter）"
-          aria-label="搜尋品項，按 Enter 查詢"
-          className="max-w-sm"
-        />
-
-        <Popover
-          open={isFilterPopoverOpen}
-          onOpenChange={handleFilterPopoverOpenChange}
-        >
-          <PopoverTrigger
-            render={
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                aria-label="篩選"
-              >
-                <FilterIcon className="h-4 w-4" />
-              </Button>
-            }
+      <div className="mb-4 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Input
+            ref={searchInputRef}
+            key={listUrl.q}
+            defaultValue={listUrl.q}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                applySearch();
+              }
+            }}
+            placeholder="搜尋品項（按 Enter）"
+            aria-label="搜尋品項，按 Enter 查詢"
+            className="w-full max-w-sm"
           />
-          <PopoverContent className="w-72 p-3" align="end">
+          <Button type="button" variant="outline" onClick={applySearch}>
+            搜尋
+          </Button>
+        </div>
+        <div className="flex items-center gap-2">
+          <Popover
+            open={isFilterPopoverOpen}
+            onOpenChange={handleFilterPopoverOpenChange}
+          >
+            <PopoverTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  aria-label="篩選"
+                >
+                  <FilterIcon className="h-4 w-4" />
+                </Button>
+              }
+            />
+            <PopoverContent className="w-72 p-3" align="end">
             <p className="px-1 text-xs font-medium text-muted-foreground">
               篩選條件
             </p>
@@ -772,25 +481,41 @@ function OrdersPage() {
                 <p className="text-sm font-medium">收款狀態</p>
                 <Select
                   value={draftFilterPaymentStatus}
-                  onValueChange={handleFilterPaymentStatusChange}
+                  onValueChange={(value) =>
+                    setDraftFilterPaymentStatus(
+                      value as OrdersListUrlState["payment"]
+                    )
+                  }
                 >
-                  <SelectTrigger aria-label="篩選收款狀態">
+                  <SelectTrigger
+                    aria-label="篩選收款狀態"
+                    className={paymentStatusTextClass(draftFilterPaymentStatus)}
+                  >
                     <SelectValue placeholder="收款狀態" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="全部">全部收款狀態</SelectItem>
-                    <SelectItem value="未收款">未收款</SelectItem>
-                    <SelectItem value="已收款">已收款</SelectItem>
-                    <SelectItem value="已入帳">已入帳</SelectItem>
+                    <SelectItem value="未收款" className="text-red-500">
+                      未收款
+                    </SelectItem>
+                    <SelectItem value="已收款" className="text-amber-500">
+                      已收款
+                    </SelectItem>
+                    <SelectItem value="已入帳" className="text-green-500">
+                      已入帳
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-
               <div className="space-y-1">
                 <p className="text-sm font-medium">商品狀態</p>
                 <Select
                   value={draftFilterProductStatus}
-                  onValueChange={handleFilterProductStatusChange}
+                  onValueChange={(value) =>
+                    setDraftFilterProductStatus(
+                      value as OrdersListUrlState["product"]
+                    )
+                  }
                 >
                   <SelectTrigger aria-label="篩選商品狀態">
                     <SelectValue placeholder="商品狀態" />
@@ -806,22 +531,23 @@ function OrdersPage() {
                   </SelectContent>
                 </Select>
               </div>
-
               <div className="space-y-1">
                 <p className="text-sm font-medium">包裹編號</p>
                 <Select
                   value={draftFilterPackageNumber}
-                  onValueChange={handleFilterPackageNumberChange}
+                  onValueChange={(value) => {
+                    if (value) {
+                      setDraftFilterPackageNumber(value);
+                    }
+                  }}
                 >
                   <SelectTrigger aria-label="篩選包裹編號">
                     <SelectValue placeholder="包裹編號" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="全部">全部包裹編號</SelectItem>
-                    <SelectItem value="未指定">未指定</SelectItem>
-                    {packageNumberOptions.map((packageNumber) => (
-                      <SelectItem key={packageNumber} value={packageNumber}>
-                        {packageNumber}
+                    {filterPackageSelectValues.map((pkg) => (
+                      <SelectItem key={pkg} value={pkg}>
+                        {pkg === "全部" ? "全部包裹編號" : pkg}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -831,64 +557,61 @@ function OrdersPage() {
                 套用
               </Button>
             </div>
-          </PopoverContent>
-        </Popover>
-
-        {selectedOrderIds.length > 0 && (
-          <Popover
-            open={isMoveToPopoverOpen}
-            onOpenChange={setIsMoveToPopoverOpen}
-          >
-            <PopoverTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  aria-label="move to"
-                  title="move to"
-                >
-                  <FolderInputIcon className="h-4 w-4" />
-                </Button>
-              }
-            />
-            <PopoverContent className="w-64 space-y-3" align="start">
-              <p className="text-sm font-medium">指定包裹編號</p>
-              <Select
-                value={bulkPackageNumber}
-                onValueChange={(value) => value && setBulkPackageNumber(value)}
-              >
-                <SelectTrigger aria-label="批次設定包裹編號">
-                  <SelectValue placeholder="包裹編號" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="未指定">未指定</SelectItem>
-                  {packageNumberOptions.map((packageNumber) => (
-                    <SelectItem key={packageNumber} value={packageNumber}>
-                      {packageNumber}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                type="button"
-                className="w-full"
-                onClick={applyBulkPackageNumber}
-              >
-                套用到已選訂單
-              </Button>
             </PopoverContent>
           </Popover>
-        )}
+          {selectedOrderIds.length > 0 && (
+            <Popover
+              open={isMoveToPopoverOpen}
+              onOpenChange={setIsMoveToPopoverOpen}
+            >
+              <PopoverTrigger
+                render={
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    aria-label="move to"
+                    title="move to"
+                  >
+                    <FolderInputIcon className="h-4 w-4" />
+                  </Button>
+                }
+              />
+              <PopoverContent className="w-64 space-y-3" align="start">
+                <p className="text-sm font-medium">指定包裹編號</p>
+                <Select
+                  value={bulkPackageNumber}
+                  onValueChange={(value) => value && setBulkPackageNumber(value)}
+                >
+                  <SelectTrigger aria-label="批次設定包裹編號">
+                    <SelectValue placeholder="包裹編號" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="未指定">未指定</SelectItem>
+                    {packageNumberOptions.map((packageNumber) => (
+                      <SelectItem key={packageNumber} value={packageNumber}>
+                        {packageNumber}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  className="w-full"
+                  onClick={applyBulkPackageNumber}
+                >
+                  套用到已選訂單
+                </Button>
+              </PopoverContent>
+            </Popover>
+          )}
+        </div>
       </div>
-
       <div className="mb-4 flex flex-wrap gap-2">
         {listUrl.q !== "" && (
           <button
             type="button"
-            onClick={() => {
-              patchListUrl({ q: "", page: 1 });
-            }}
+            onClick={() => patchListUrl({ q: "", page: 1 })}
             className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-3 py-1 text-xs"
           >
             品項: {listUrl.q}
@@ -898,9 +621,7 @@ function OrdersPage() {
         {listUrl.payment !== "全部" && (
           <button
             type="button"
-            onClick={() => {
-              patchListUrl({ payment: "全部", page: 1 });
-            }}
+            onClick={() => patchListUrl({ payment: "全部", page: 1 })}
             className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-3 py-1 text-xs"
           >
             收款狀態: {listUrl.payment}
@@ -910,9 +631,7 @@ function OrdersPage() {
         {listUrl.product !== "全部" && (
           <button
             type="button"
-            onClick={() => {
-              patchListUrl({ product: "全部", page: 1 });
-            }}
+            onClick={() => patchListUrl({ product: "全部", page: 1 })}
             className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-3 py-1 text-xs"
           >
             商品狀態: {listUrl.product}
@@ -922,9 +641,7 @@ function OrdersPage() {
         {listUrl.pkg !== "全部" && (
           <button
             type="button"
-            onClick={() => {
-              patchListUrl({ pkg: "全部", page: 1 });
-            }}
+            onClick={() => patchListUrl({ pkg: "全部", page: 1 })}
             className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-3 py-1 text-xs"
           >
             包裹編號: {listUrl.pkg}
@@ -960,12 +677,12 @@ function OrdersPage() {
               <TableHead>
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={() =>
                     patchListUrl({
                       page: 1,
                       sort: listUrl.sort === "asc" ? "desc" : "asc",
-                    });
-                  }}
+                    })
+                  }
                   className="inline-flex items-center gap-1 font-medium"
                   disabled={ordersLoading}
                 >
@@ -1040,7 +757,7 @@ function OrdersPage() {
                 </TableRow>
               ))}
             {!ordersLoading &&
-              paginatedOrders.map((order) => (
+              orders.map((order) => (
                 <TableRow key={order.id}>
                   <TableCell>
                     <input
@@ -1097,13 +814,22 @@ function OrdersPage() {
                         }
                       }}
                     >
-                      <SelectTrigger className="h-8 w-28" aria-label="收款狀態">
+                      <SelectTrigger
+                        className={`h-8 w-28 ${paymentStatusTextClass(order.paymentStatus)}`}
+                        aria-label="收款狀態"
+                      >
                         <SelectValue placeholder="收款狀態" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="未收款">未收款</SelectItem>
-                        <SelectItem value="已收款">已收款</SelectItem>
-                        <SelectItem value="已入帳">已入帳</SelectItem>
+                        <SelectItem value="未收款" className="text-red-500">
+                          未收款
+                        </SelectItem>
+                        <SelectItem value="已收款" className="text-amber-500">
+                          已收款
+                        </SelectItem>
+                        <SelectItem value="已入帳" className="text-green-500">
+                          已入帳
+                        </SelectItem>
                       </SelectContent>
                     </Select>
                   </TableCell>
@@ -1181,7 +907,7 @@ function OrdersPage() {
         </Table>
       </div>
 
-      <Dialog
+      <DeleteOrderDialog
         open={isDeleteDialogOpen}
         onOpenChange={(open) => {
           setIsDeleteDialogOpen(open);
@@ -1190,71 +916,35 @@ function OrdersPage() {
             setOrderToDeleteId(null);
           }
         }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>確認刪除</DialogTitle>
-            <DialogDescription>
-              確定要刪除這筆訂單嗎？此操作無法復原。
-            </DialogDescription>
-          </DialogHeader>
-          {deleteOrderError && (
-            <p className="text-sm text-destructive" role="alert">
-              {deleteOrderError}
-            </p>
-          )}
-          <DialogFooter>
-            <DialogClose
-              render={
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setOrderToDeleteId(null)}
-                  disabled={isDeleteOrderSubmitting}
-                >
-                  取消
-                </Button>
-              }
-            />
-            <Button
-              type="button"
-              variant="destructive"
-              onClick={() => void confirmDeleteOrder()}
-              disabled={isDeleteOrderSubmitting}
-            >
-              {isDeleteOrderSubmitting ? "刪除中…" : "確認刪除"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        orderId={orderToDeleteId}
+        error={deleteOrderError}
+        isSubmitting={deleteOrderMutation.isPending}
+        onConfirm={() => void confirmDeleteOrder()}
+      />
 
       <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-4 text-sm">
           {ordersLoading ? (
             <>
               <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">
-                  總成本（依目前篩選）:
-                </span>
+                <span className="text-muted-foreground">總成本:</span>
                 <Skeleton className="h-5 w-24" />
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">
-                  總收益（依目前篩選）:
-                </span>
+                <span className="text-muted-foreground">總收益:</span>
                 <Skeleton className="h-5 w-24" />
               </div>
             </>
           ) : (
             <>
               <p>
-                總成本（依目前篩選）:{" "}
+                總成本:{" "}
                 <span className="font-semibold">
                   {totalCost.toLocaleString()}
                 </span>
               </p>
               <p>
-                總收益（依目前篩選）:{" "}
+                總收益:{" "}
                 <span className="font-semibold">
                   {totalProfit.toLocaleString()}
                 </span>
@@ -1262,7 +952,6 @@ function OrdersPage() {
             </>
           )}
         </div>
-
         <div className="flex items-center gap-2">
           <Button
             type="button"
@@ -1287,9 +976,7 @@ function OrdersPage() {
             variant="outline"
             size="sm"
             onClick={() =>
-              patchListUrl({
-                page: Math.min(totalPages, safeCurrentPage + 1),
-              })
+              patchListUrl({ page: Math.min(totalPages, safeCurrentPage + 1) })
             }
             disabled={ordersLoading || safeCurrentPage === totalPages}
           >

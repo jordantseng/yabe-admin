@@ -1,0 +1,335 @@
+import type { Dispatch, SetStateAction } from "react";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { OrdersTableRow as OrderRow } from "@/lib/orders";
+
+export type NewOrderDraft = Omit<OrderRow, "id"> & {
+  domesticDeliveryAddress: string;
+};
+
+function paymentStatusTextClass(status: string): string {
+  if (status === "未收款") return "text-red-500";
+  if (status === "已收款") return "text-amber-500";
+  if (status === "已入帳") return "text-green-500";
+  return "";
+}
+
+type CreateOrderDialogProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  createOrderError: string | null;
+  isSubmitting: boolean;
+  newOrder: NewOrderDraft;
+  setNewOrder: Dispatch<SetStateAction<NewOrderDraft>>;
+  packageNumberOptions: string[];
+  onCreate: () => void;
+};
+
+export function CreateOrderDialog({
+  open,
+  onOpenChange,
+  createOrderError,
+  isSubmitting,
+  newOrder,
+  setNewOrder,
+  packageNumberOptions,
+  onCreate,
+}: CreateOrderDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogTrigger render={<Button type="button">建立新訂單</Button>} />
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle>建立新訂單</DialogTitle>
+          <DialogDescription>請填寫訂單資訊。</DialogDescription>
+        </DialogHeader>
+        {createOrderError && (
+          <p className="text-sm text-destructive" role="alert">
+            {createOrderError}
+          </p>
+        )}
+        <div className="space-y-4 py-2">
+          <section className="space-y-3 rounded-md border p-3">
+            <p className="text-xs font-semibold text-muted-foreground">基本資料</p>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-1">
+                <label htmlFor="new-order-item" className="text-sm font-medium">
+                  品項
+                </label>
+                <Input
+                  id="new-order-item"
+                  value={newOrder.item}
+                  onChange={(event) =>
+                    setNewOrder((current) => ({
+                      ...current,
+                      item: event.target.value,
+                    }))
+                  }
+                  placeholder="品項"
+                  aria-label="品項"
+                />
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="new-order-purchase-date" className="text-sm font-medium">
+                  購買日期
+                </label>
+                <Input
+                  id="new-order-purchase-date"
+                  type="date"
+                  value={newOrder.purchaseDate}
+                  onChange={(event) =>
+                    setNewOrder((current) => ({
+                      ...current,
+                      purchaseDate: event.target.value,
+                    }))
+                  }
+                  aria-label="購買日期"
+                />
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="new-order-buyer" className="text-sm font-medium">
+                  購買人
+                </label>
+                <Input
+                  id="new-order-buyer"
+                  value={newOrder.buyer}
+                  onChange={(event) =>
+                    setNewOrder((current) => ({
+                      ...current,
+                      buyer: event.target.value,
+                    }))
+                  }
+                  placeholder="購買人"
+                  aria-label="購買人"
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">付款人</label>
+                <Select
+                  value={newOrder.payer}
+                  onValueChange={(value) => {
+                    if (value === "虹" || value === "藍") {
+                      setNewOrder((current) => ({
+                        ...current,
+                        payer: value,
+                      }));
+                    }
+                  }}
+                >
+                  <SelectTrigger aria-label="付款人">
+                    <SelectValue placeholder="付款人" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="虹">虹</SelectItem>
+                    <SelectItem value="藍">藍</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1 md:col-span-2">
+                <label htmlFor="new-order-address" className="text-sm font-medium">
+                  地址
+                </label>
+                <Input
+                  id="new-order-address"
+                  value={newOrder.domesticDeliveryAddress}
+                  onChange={(event) =>
+                    setNewOrder((current) => ({
+                      ...current,
+                      domesticDeliveryAddress: event.target.value,
+                    }))
+                  }
+                  placeholder="地址"
+                  aria-label="地址"
+                />
+              </div>
+            </div>
+          </section>
+
+          <section className="space-y-3 rounded-md border p-3">
+            <p className="text-xs font-semibold text-muted-foreground">金額資訊</p>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="space-y-1">
+                <label htmlFor="new-order-cost" className="text-sm font-medium">
+                  成本
+                </label>
+                <Input
+                  id="new-order-cost"
+                  type="number"
+                  value={newOrder.cost}
+                  onChange={(event) =>
+                    setNewOrder((current) => ({
+                      ...current,
+                      cost: event.target.value,
+                    }))
+                  }
+                  placeholder="成本"
+                  aria-label="成本"
+                />
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="new-order-price" className="text-sm font-medium">
+                  售價
+                </label>
+                <Input
+                  id="new-order-price"
+                  type="number"
+                  value={newOrder.price}
+                  onChange={(event) =>
+                    setNewOrder((current) => ({
+                      ...current,
+                      price: event.target.value,
+                    }))
+                  }
+                  placeholder="售價"
+                  aria-label="售價"
+                />
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="new-order-domestic-shipping-fee" className="text-sm font-medium">
+                  店到店運費
+                </label>
+                <Input
+                  id="new-order-domestic-shipping-fee"
+                  type="number"
+                  value={newOrder.domesticShippingFee}
+                  onChange={(event) =>
+                    setNewOrder((current) => ({
+                      ...current,
+                      domesticShippingFee: event.target.value,
+                    }))
+                  }
+                  placeholder="店到店運費"
+                  aria-label="店到店運費"
+                />
+              </div>
+            </div>
+          </section>
+
+          <section className="space-y-3 rounded-md border p-3">
+            <p className="text-xs font-semibold text-muted-foreground">訂單狀態</p>
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="space-y-1">
+                <label className="text-sm font-medium">收款狀態</label>
+                <Select
+                  value={newOrder.paymentStatus}
+                  onValueChange={(value) => {
+                    if (value === "未收款" || value === "已收款" || value === "已入帳") {
+                      setNewOrder((current) => ({
+                        ...current,
+                        paymentStatus: value,
+                      }));
+                    }
+                  }}
+                >
+                  <SelectTrigger
+                    aria-label="收款狀態"
+                    className={paymentStatusTextClass(newOrder.paymentStatus)}
+                  >
+                    <SelectValue placeholder="收款狀態" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="未收款" className="text-red-500">
+                      未收款
+                    </SelectItem>
+                    <SelectItem value="已收款" className="text-amber-500">
+                      已收款
+                    </SelectItem>
+                    <SelectItem value="已入帳" className="text-green-500">
+                      已入帳
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">商品狀態</label>
+                <Select
+                  value={newOrder.productStatus}
+                  onValueChange={(value) => {
+                    if (
+                      value === "未購買" ||
+                      value === "已購賣" ||
+                      value === "到虹家" ||
+                      value === "集運回台" ||
+                      value === "到台灣" ||
+                      value === "已出貨"
+                    ) {
+                      setNewOrder((current) => ({
+                        ...current,
+                        productStatus: value,
+                      }));
+                    }
+                  }}
+                >
+                  <SelectTrigger aria-label="商品狀態">
+                    <SelectValue placeholder="商品狀態" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="未購買">未購買</SelectItem>
+                    <SelectItem value="已購賣">已購賣</SelectItem>
+                    <SelectItem value="到虹家">到虹家</SelectItem>
+                    <SelectItem value="集運回台">集運回台</SelectItem>
+                    <SelectItem value="到台灣">到台灣</SelectItem>
+                    <SelectItem value="已出貨">已出貨</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium">包裹編號</label>
+                <Select
+                  value={newOrder.packageNumber}
+                  onValueChange={(value) => {
+                    if (value) {
+                      setNewOrder((current) => ({
+                        ...current,
+                        packageNumber: value,
+                      }));
+                    }
+                  }}
+                >
+                  <SelectTrigger aria-label="包裹編號">
+                    <SelectValue placeholder="包裹編號" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="未指定">未指定</SelectItem>
+                    {packageNumberOptions.map((packageNumber) => (
+                      <SelectItem key={packageNumber} value={packageNumber}>
+                        {packageNumber}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </section>
+        </div>
+        <DialogFooter>
+          <DialogClose render={<Button variant="outline">取消</Button>} />
+          <Button
+            type="button"
+            onClick={onCreate}
+            disabled={!newOrder.item.trim() || !newOrder.buyer.trim() || isSubmitting}
+          >
+            {isSubmitting ? "建立中…" : "建立訂單"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}

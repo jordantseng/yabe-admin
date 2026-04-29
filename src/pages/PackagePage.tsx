@@ -1,11 +1,11 @@
 import {
   Fragment,
-  startTransition,
-  useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { EyeIcon, FilterIcon, Trash2Icon } from "lucide-react";
 import { useQueryStates } from "nuqs";
 import { Link } from "react-router-dom";
@@ -43,10 +43,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  PACKAGE_NUMBER_OPTIONS_CHANGED_EVENT,
-  notifyPackageNumberOptionsChanged,
-} from "@/lib/package-number-options";
-import {
   createPackage,
   deletePackageByNumber,
   fetchPackageNumbersFromDb,
@@ -62,6 +58,8 @@ import {
 import type { OrderProductStatus } from "@/types/database";
 
 const PACKAGE_PAGE_SIZE = 15;
+const PACKAGE_ROWS_QUERY_KEY = ["packages", "page-rows"] as const;
+const PACKAGE_NUMBERS_QUERY_KEY = ["packages", "numbers"] as const;
 
 /** 包裹列表列（由訂單 + 關聯包裹映射）。 */
 export type PackageTableRow = {
@@ -156,6 +154,7 @@ function groupPackageRows(
 }
 
 function PackagePage() {
+  const queryClient = useQueryClient();
   const [listUrl, setListUrl] = useQueryStates(packagesListSearchParams, {
     history: "push",
   });
@@ -167,15 +166,6 @@ function PackagePage() {
   const [createPackageError, setCreatePackageError] = useState<string | null>(
     null
   );
-  const [isCreatePackageSubmitting, setIsCreatePackageSubmitting] =
-    useState(false);
-  const [rows, setRows] = useState<PackageTableRow[]>([]);
-  const [rowsLoading, setRowsLoading] = useState(true);
-  const [rowsError, setRowsError] = useState<string | null>(null);
-  const [listRefreshKey, setListRefreshKey] = useState(0);
-  const [packageNumberOptions, setPackageNumberOptions] = useState<string[]>(
-    []
-  );
   const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
   const [draftFilterPackageNumber, setDraftFilterPackageNumber] =
     useState<string>("全部");
@@ -186,8 +176,6 @@ function PackagePage() {
   const [deletePackageError, setDeletePackageError] = useState<string | null>(
     null
   );
-  const [isDeletePackageSubmitting, setIsDeletePackageSubmitting] =
-    useState(false);
   const [isEditPackageFeeDialogOpen, setIsEditPackageFeeDialogOpen] =
     useState(false);
   const [packageToEditFee, setPackageToEditFee] = useState<string | null>(null);
@@ -195,31 +183,74 @@ function PackagePage() {
   const [editPackageFeeError, setEditPackageFeeError] = useState<string | null>(
     null,
   );
-  const [isEditPackageFeeSubmitting, setIsEditPackageFeeSubmitting] =
-    useState(false);
-  const totalRows = rows.length;
-  const totalPages = Math.max(1, Math.ceil(totalRows / PACKAGE_PAGE_SIZE));
-  const safeCurrentPage = Math.min(listUrl.page, totalPages);
-  const paginatedRows = useMemo(() => {
-    const from = (safeCurrentPage - 1) * PACKAGE_PAGE_SIZE;
-    return rows.slice(from, from + PACKAGE_PAGE_SIZE);
-  }, [rows, safeCurrentPage]);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const rowsQuery = useQuery({
+    queryKey: [PACKAGE_ROWS_QUERY_KEY, listUrl.q, listUrl.pkg, listUrl.page],
+    queryFn: async () => {
+      const res = await fetchOrdersForPackagePage({
+        itemSearch: listUrl.q,
+        packageFilter: listUrl.pkg,
+        page: listUrl.page,
+        pageSize: PACKAGE_PAGE_SIZE,
+      });
+      if (res.error) {
+        throw new Error(res.error.message);
+      }
+      return {
+        rows: (res.data ?? []).map(orderToPackageTableRow),
+        count: res.count,
+      };
+    },
+  });
 
-  useEffect(() => {
-    const refresh = () => {
-      void (async () => {
-        const res = await fetchPackageNumbersFromDb();
-        if (!res.error && res.data) {
-          setPackageNumberOptions(res.data ?? []);
-        }
-      })();
-    };
-    refresh();
-    window.addEventListener(PACKAGE_NUMBER_OPTIONS_CHANGED_EVENT, refresh);
-    return () => {
-      window.removeEventListener(PACKAGE_NUMBER_OPTIONS_CHANGED_EVENT, refresh);
-    };
-  }, []);
+  const packageNumbersQuery = useQuery({
+    queryKey: PACKAGE_NUMBERS_QUERY_KEY,
+    queryFn: async () => {
+      const res = await fetchPackageNumbersFromDb();
+      if (res.error) {
+        throw new Error(res.error.message);
+      }
+      return res.data ?? [];
+    },
+  });
+
+  const invalidatePackageRows = () => {
+    void queryClient.invalidateQueries({ queryKey: [PACKAGE_ROWS_QUERY_KEY] });
+  };
+  const createPackageMutation = useMutation({
+    mutationFn: createPackage,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: PACKAGE_NUMBERS_QUERY_KEY });
+      invalidatePackageRows();
+    },
+  });
+  const updateOrderFieldMutation = useMutation({
+    mutationFn: async (args: { id: string; patch: Parameters<typeof updateOrderFields>[1] }) => {
+      const { error } = await updateOrderFields(args.id, args.patch);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => invalidatePackageRows(),
+  });
+  const deletePackageMutation = useMutation({
+    mutationFn: async (pkg: string) => {
+      const { error } = await deletePackageByNumber(pkg);
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: PACKAGE_NUMBERS_QUERY_KEY });
+      invalidatePackageRows();
+    },
+  });
+  const editPackageFeeMutation = useMutation({
+    mutationFn: async (args: { pkg: string; fee: number }) => {
+      const { error } = await updatePackageInternationalShippingFeeByNumber(
+        args.pkg,
+        args.fee,
+      );
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => invalidatePackageRows(),
+  });
 
   useEffect(() => {
     if (listUrl.pkg === "未指定") {
@@ -227,49 +258,29 @@ function PackagePage() {
     }
   }, [listUrl.pkg, setListUrl]);
 
+  const totalRows = rowsQuery.data?.count ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalRows / PACKAGE_PAGE_SIZE));
+  const safeCurrentPage = Math.min(listUrl.page, totalPages);
+
   useEffect(() => {
     if (safeCurrentPage !== listUrl.page) {
       void setListUrl({ page: safeCurrentPage }, { history: "replace" });
     }
   }, [safeCurrentPage, listUrl.page, setListUrl]);
 
-  useEffect(() => {
-    let cancelled = false;
-    startTransition(() => {
-      setRowsLoading(true);
-      setRowsError(null);
+  const patchListUrl = (patch: Partial<{ q: string; pkg: string; page: number }>) => {
+    void setListUrl(patch);
+  };
+  const applySearch = () => {
+    patchListUrl({
+      q: (searchInputRef.current?.value ?? "").trim(),
+      page: 1,
     });
-
-    void (async () => {
-      const res = await fetchOrdersForPackagePage({
-        itemSearch: listUrl.q,
-        packageFilter: listUrl.pkg,
-      });
-      if (cancelled) {
-        return;
-      }
-      startTransition(() => {
-        setRowsLoading(false);
-        if (res.error) {
-          setRowsError(res.error.message);
-          setRows([]);
-          return;
-        }
-        setRows((res.data ?? []).map(orderToPackageTableRow));
-      });
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [listUrl.q, listUrl.pkg, listRefreshKey]);
-
-  const patchListUrl = useCallback(
-    (patch: Partial<{ q: string; pkg: string; page: number }>) => {
-      void setListUrl(patch);
-    },
-    [setListUrl]
-  );
+  };
+  const rows = rowsQuery.data?.rows ?? [];
+  const packageNumberOptions = packageNumbersQuery.data ?? [];
+  const rowsLoading = rowsQuery.isLoading;
+  const rowsError = (rowsQuery.error as Error | null)?.message ?? null;
 
   const filterPackageSelectValues = useMemo(() => {
     const ordered: string[] = ["全部"];
@@ -294,8 +305,7 @@ function PackagePage() {
     }
     return ordered;
   }, [packageNumberOptions]);
-
-  const groupedRows = useMemo(() => groupPackageRows(paginatedRows), [paginatedRows]);
+  const groupedRows = useMemo(() => groupPackageRows(rows), [rows]);
   const totals = useMemo(() => {
     let totalPrice = 0;
     let totalCost = 0;
@@ -332,24 +342,17 @@ function PackagePage() {
     };
   }, [rows]);
 
-  const updateRow = (id: string, patch: Partial<PackageTableRow>) => {
-    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
-  };
-
   const handlePackageNumberChange = (id: string, value: string | null) => {
     if (value) {
       setRowFieldError(null);
-      const previous = rows.find((r) => r.id === id)?.packageNumber;
-      updateRow(id, { packageNumber: value });
       void (async () => {
-        const { error } = await updateOrderFields(id, { packageNumber: value });
-        if (!error) {
-          setListRefreshKey((k) => k + 1);
-          return;
-        }
-        setRowFieldError(error.message);
-        if (previous) {
-          updateRow(id, { packageNumber: previous });
+        try {
+          await updateOrderFieldMutation.mutateAsync({
+            id,
+            patch: { packageNumber: value },
+          });
+        } catch (error) {
+          setRowFieldError((error as Error).message);
         }
       })();
     }
@@ -365,16 +368,14 @@ function PackagePage() {
       value === "已出貨"
     ) {
       setRowFieldError(null);
-      const previous = rows.find((r) => r.id === id)?.productStatus;
-      updateRow(id, { productStatus: value });
       void (async () => {
-        const { error } = await updateOrderFields(id, { productStatus: value });
-        if (!error) {
-          return;
-        }
-        setRowFieldError(error.message);
-        if (previous) {
-          updateRow(id, { productStatus: previous });
+        try {
+          await updateOrderFieldMutation.mutateAsync({
+            id,
+            patch: { productStatus: value },
+          });
+        } catch (error) {
+          setRowFieldError((error as Error).message);
         }
       })();
     }
@@ -382,12 +383,10 @@ function PackagePage() {
 
   const handleCreatePackage = async () => {
     setCreatePackageError(null);
-    setIsCreatePackageSubmitting(true);
-    const { data, error } = await createPackage({
+    const { data, error } = await createPackageMutation.mutateAsync({
       notes: newPackageNotes.trim() || null,
       internationalShippingFee: Number.parseFloat(newPackageInternationalShippingFee),
     });
-    setIsCreatePackageSubmitting(false);
     if (error) {
       setCreatePackageError(error.message);
       return;
@@ -399,8 +398,6 @@ function PackagePage() {
     setNewPackageNotes("");
     setNewPackageInternationalShippingFee("0");
     setIsCreatePackageDialogOpen(false);
-    notifyPackageNumberOptionsChanged();
-    setListRefreshKey((k) => k + 1);
   };
 
   const handleFilterPopoverOpenChange = (open: boolean) => {
@@ -426,11 +423,10 @@ function PackagePage() {
       return;
     }
     setDeletePackageError(null);
-    setIsDeletePackageSubmitting(true);
-    const { error } = await deletePackageByNumber(packageToDelete);
-    setIsDeletePackageSubmitting(false);
-    if (error) {
-      setDeletePackageError(error.message);
+    try {
+      await deletePackageMutation.mutateAsync(packageToDelete);
+    } catch (error) {
+      setDeletePackageError((error as Error).message);
       return;
     }
     if (listUrl.pkg === packageToDelete) {
@@ -438,8 +434,6 @@ function PackagePage() {
     }
     setPackageToDelete(null);
     setIsDeletePackageDialogOpen(false);
-    notifyPackageNumberOptionsChanged();
-    setListRefreshKey((k) => k + 1);
   };
 
   const openEditPackageFeeDialog = (pkg: string, currentFee: string) => {
@@ -455,19 +449,17 @@ function PackagePage() {
     }
     const parsed = Number.parseFloat(editPackageFeeValue);
     setEditPackageFeeError(null);
-    setIsEditPackageFeeSubmitting(true);
-    const { error } = await updatePackageInternationalShippingFeeByNumber(
-      packageToEditFee,
-      Number.isNaN(parsed) ? 0 : parsed,
-    );
-    setIsEditPackageFeeSubmitting(false);
-    if (error) {
-      setEditPackageFeeError(error.message);
+    try {
+      await editPackageFeeMutation.mutateAsync({
+        pkg: packageToEditFee,
+        fee: Number.isNaN(parsed) ? 0 : parsed,
+      });
+    } catch (error) {
+      setEditPackageFeeError((error as Error).message);
       return;
     }
     setPackageToEditFee(null);
     setIsEditPackageFeeDialogOpen(false);
-    setListRefreshKey((k) => k + 1);
   };
 
   return (
@@ -524,9 +516,9 @@ function PackagePage() {
                 <Button
                   type="button"
                   onClick={() => void handleCreatePackage()}
-                  disabled={isCreatePackageSubmitting}
+                  disabled={createPackageMutation.isPending}
                 >
-                  {isCreatePackageSubmitting ? "建立中…" : "建立"}
+                  {createPackageMutation.isPending ? "建立中…" : "建立"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -534,20 +526,26 @@ function PackagePage() {
         </div>
       </div>
 
-      <div className="mb-2 flex flex-wrap items-center gap-2">
-        <Input
-          key={listUrl.q}
-          defaultValue={listUrl.q}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") {
-              event.preventDefault();
-              void setListUrl({ q: event.currentTarget.value.trim(), page: 1 });
-            }
-          }}
-          placeholder="搜尋品項（按 Enter）"
-          aria-label="搜尋品項，按 Enter 查詢"
-          className="max-w-sm"
-        />
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Input
+            ref={searchInputRef}
+            key={listUrl.q}
+            defaultValue={listUrl.q}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                applySearch();
+              }
+            }}
+            placeholder="搜尋品項（按 Enter）"
+            aria-label="搜尋品項，按 Enter 查詢"
+            className="w-full max-w-sm"
+          />
+          <Button type="button" variant="outline" onClick={applySearch}>
+            搜尋
+          </Button>
+        </div>
 
         <Popover
           open={isFilterPopoverOpen}
@@ -565,7 +563,7 @@ function PackagePage() {
               </Button>
             }
           />
-          <PopoverContent className="w-72 p-3" align="start">
+          <PopoverContent className="w-72 p-3" align="end">
             <p className="px-1 text-xs font-medium text-muted-foreground">
               篩選條件
             </p>
@@ -856,47 +854,74 @@ function PackagePage() {
           </TableBody>
         </Table>
       </div>
-      <div className="mt-3 flex flex-wrap items-center gap-4 text-sm">
-        <span className="text-muted-foreground">總售價: {totals.totalPrice}</span>
-        <span className="text-muted-foreground">總成本: {totals.totalCost}</span>
-        <span className="text-muted-foreground">
-          總國際運費: {totals.totalInternationalShippingFee}
-        </span>
-        <span className="text-muted-foreground">
-          總店到店運費: {totals.totalDomesticShippingFee}
-        </span>
-        <span className="font-semibold">收益: {totals.totalProfit}</span>
-      </div>
-      <div className="mt-2 flex items-center justify-end gap-2">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => patchListUrl({ page: Math.max(1, safeCurrentPage - 1) })}
-          disabled={rowsLoading || safeCurrentPage === 1}
-        >
-          上一頁
-        </Button>
-        {rowsLoading ? (
-          <Skeleton className="h-5 w-28" />
-        ) : (
-          <span className="text-sm text-muted-foreground">
-            第 {safeCurrentPage} / {totalPages} 頁
-          </span>
-        )}
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() =>
-            patchListUrl({
-              page: Math.min(totalPages, safeCurrentPage + 1),
-            })
-          }
-          disabled={rowsLoading || safeCurrentPage === totalPages}
-        >
-          下一頁
-        </Button>
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-4 text-sm">
+          {rowsLoading ? (
+            <>
+              <Skeleton className="h-5 w-28" />
+              <Skeleton className="h-5 w-28" />
+              <Skeleton className="h-5 w-28" />
+              <Skeleton className="h-5 w-28" />
+              <Skeleton className="h-5 w-28" />
+            </>
+          ) : (
+            <>
+              <p>
+                總售價: <span className="font-semibold">{totals.totalPrice.toLocaleString()}</span>
+              </p>
+              <p>
+                總成本: <span className="font-semibold">{totals.totalCost.toLocaleString()}</span>
+              </p>
+              <p>
+                總國際運費:{" "}
+                <span className="font-semibold">
+                  {totals.totalInternationalShippingFee.toLocaleString()}
+                </span>
+              </p>
+              <p>
+                總店到店運費:{" "}
+                <span className="font-semibold">
+                  {totals.totalDomesticShippingFee.toLocaleString()}
+                </span>
+              </p>
+              <p>
+                收益: <span className="font-semibold">{totals.totalProfit.toLocaleString()}</span>
+              </p>
+            </>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => patchListUrl({ page: Math.max(1, safeCurrentPage - 1) })}
+            disabled={rowsLoading || safeCurrentPage === 1}
+          >
+            上一頁
+          </Button>
+          {rowsLoading ? (
+            <Skeleton className="h-5 w-28" />
+          ) : (
+            <span className="text-sm text-muted-foreground">
+              第 {safeCurrentPage} / {totalPages} 頁
+            </span>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              patchListUrl({
+                page: Math.min(totalPages, safeCurrentPage + 1),
+              })
+            }
+            disabled={rowsLoading || safeCurrentPage === totalPages}
+          >
+            下一頁
+          </Button>
+        </div>
       </div>
       <Dialog
         open={isDeletePackageDialogOpen}
@@ -927,9 +952,9 @@ function PackagePage() {
               type="button"
               variant="destructive"
               onClick={() => void confirmDeletePackage()}
-              disabled={isDeletePackageSubmitting}
+              disabled={deletePackageMutation.isPending}
             >
-              {isDeletePackageSubmitting ? "刪除中…" : "刪除包裹"}
+              {deletePackageMutation.isPending ? "刪除中…" : "刪除包裹"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -968,9 +993,9 @@ function PackagePage() {
             <Button
               type="button"
               onClick={() => void confirmEditPackageFee()}
-              disabled={isEditPackageFeeSubmitting}
+              disabled={editPackageFeeMutation.isPending}
             >
-              {isEditPackageFeeSubmitting ? "儲存中…" : "儲存"}
+              {editPackageFeeMutation.isPending ? "儲存中…" : "儲存"}
             </Button>
           </DialogFooter>
         </DialogContent>

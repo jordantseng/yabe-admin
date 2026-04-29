@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Controller, useForm } from "react-hook-form";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -16,7 +17,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { fetchPackageNumbersFromDb } from "@/lib/packages";
-import { PACKAGE_NUMBER_OPTIONS_CHANGED_EVENT } from "@/lib/package-number-options";
+
+const PACKAGE_NUMBERS_QUERY_KEY = ["packages", "numbers"] as const;
+
+function paymentStatusTextClass(status: string): string {
+  if (status === "未收款") return "text-red-500";
+  if (status === "已收款") return "text-amber-500";
+  if (status === "已入帳") return "text-green-500";
+  return "";
+}
 
 function emptyOrderDetailForm(): OrderDetailFormValues {
   return {
@@ -38,9 +47,6 @@ function emptyOrderDetailForm(): OrderDetailFormValues {
 function OrderDetailPage() {
   const { orderId } = useParams();
   const navigate = useNavigate();
-  const [packageNumberOptions, setPackageNumberOptions] = useState<string[]>(
-    [],
-  );
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -62,10 +68,22 @@ function OrderDetailPage() {
   const watchedPrice = watch("price");
   const watchedDomesticShippingFee = watch("domesticShippingFee");
   const watchedRevenue = watch("revenue");
+  const packageNumbersQuery = useQuery({
+    queryKey: PACKAGE_NUMBERS_QUERY_KEY,
+    queryFn: async () => {
+      const res = await fetchPackageNumbersFromDb();
+      if (res.error) {
+        throw new Error(res.error.message);
+      }
+      return res.data ?? [];
+    },
+  });
 
   useEffect(() => {
     const nextRevenue =
-      (watchedPrice ?? 0) - (watchedCost ?? 0) - (watchedDomesticShippingFee ?? 0);
+      (watchedPrice ?? 0) -
+      (watchedCost ?? 0) -
+      (watchedDomesticShippingFee ?? 0);
     if (nextRevenue !== watchedRevenue) {
       setValue("revenue", nextRevenue, { shouldDirty: true });
     }
@@ -77,24 +95,7 @@ function OrderDetailPage() {
     setValue,
   ]);
 
-  useEffect(() => {
-    const refresh = () => {
-      void (async () => {
-        const res = await fetchPackageNumbersFromDb();
-        if (!res.error && res.data) {
-          setPackageNumberOptions(res.data ?? []);
-        }
-      })();
-    };
-    refresh();
-    window.addEventListener(PACKAGE_NUMBER_OPTIONS_CHANGED_EVENT, refresh);
-    return () => {
-      window.removeEventListener(
-        PACKAGE_NUMBER_OPTIONS_CHANGED_EVENT,
-        refresh,
-      );
-    };
-  }, []);
+  const packageNumberOptions = packageNumbersQuery.data ?? [];
 
   useEffect(() => {
     if (!orderId) {
@@ -107,7 +108,7 @@ function OrderDetailPage() {
     setLoadError(null);
     setIsLoading(true);
 
-    void (async () => {
+    (async () => {
       const { data, error } = await fetchOrderById(orderId);
       if (cancelled) {
         return;
@@ -190,195 +191,219 @@ function OrderDetailPage() {
 
       <form onSubmit={handleSubmit(onSubmit)} className="mb-6 space-y-6">
         <fieldset disabled={formDisabled || isSaving} className="contents">
-        <div className="grid gap-4 rounded-md border p-4 md:grid-cols-2">
-          <div className="md:col-span-2">
-            <p className="text-xs font-semibold text-muted-foreground">基本資料</p>
-          </div>
-          <Field label="品項">
-            <input
-              {...register("item", { required: true })}
-              className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
-            />
-          </Field>
-
-          <Field label="購買日期">
-            <input
-              type="date"
-              {...register("purchaseDate", { required: true })}
-              className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
-            />
-          </Field>
-
-          <Field label="購買人">
-            <input
-              {...register("buyer", { required: true })}
-              className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
-            />
-          </Field>
-
-          <Field label="地址">
-            <input
-              {...register("domesticDeliveryAddress")}
-              className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
-            />
-          </Field>
-
-          <Field label="付款人">
-            <Controller
-              control={control}
-              name="payer"
-              rules={{ required: true }}
-              render={({ field }) => (
-                <Select
-                  value={field.value}
-                  onValueChange={(value) => {
-                    if (value) field.onChange(value);
-                  }}
-                >
-                  <SelectTrigger className="w-full" aria-label="付款人">
-                    <SelectValue placeholder="付款人" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="虹">虹</SelectItem>
-                    <SelectItem value="藍">藍</SelectItem>
-                  </SelectContent>
-                </Select>
-              )}
-            />
-          </Field>
-
-          <div className="md:col-span-2 mt-2">
-            <p className="text-xs font-semibold text-muted-foreground">金額資訊</p>
-          </div>
-
-          <div className="md:col-span-2 grid gap-4 md:grid-cols-4">
-            <Field label="成本">
+          <div className="grid gap-4 rounded-md border p-4 md:grid-cols-2">
+            <div className="md:col-span-2">
+              <p className="text-xs font-semibold text-muted-foreground">
+                基本資料
+              </p>
+            </div>
+            <Field label="品項">
               <input
-                type="number"
-                {...register("cost", { valueAsNumber: true, required: true })}
+                {...register("item", { required: true })}
                 className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
               />
             </Field>
 
-            <Field label="售價">
+            <Field label="購買日期">
               <input
-                type="number"
-                {...register("price", { valueAsNumber: true, required: true })}
+                type="date"
+                {...register("purchaseDate", { required: true })}
                 className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
               />
             </Field>
 
-            <Field label="店到店運費">
+            <Field label="購買人">
               <input
-                type="number"
-                {...register("domesticShippingFee", {
-                  valueAsNumber: true,
-                  required: true,
-                })}
+                {...register("buyer", { required: true })}
                 className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
               />
             </Field>
 
-            <Field label="收益">
+            <Field label="地址">
               <input
-                type="number"
-                {...register("revenue", { valueAsNumber: true, required: true })}
-                readOnly
-                className="w-full rounded-md border border-input bg-muted px-3 py-2 text-sm"
+                {...register("domesticDeliveryAddress")}
+                className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
               />
             </Field>
+
+            <Field label="付款人">
+              <Controller
+                control={control}
+                name="payer"
+                rules={{ required: true }}
+                render={({ field }) => (
+                  <Select
+                    value={field.value}
+                    onValueChange={(value) => {
+                      if (value) field.onChange(value);
+                    }}
+                  >
+                    <SelectTrigger className="w-full" aria-label="付款人">
+                      <SelectValue placeholder="付款人" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="虹">虹</SelectItem>
+                      <SelectItem value="藍">藍</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            </Field>
+
+            <div className="md:col-span-2 mt-2">
+              <p className="text-xs font-semibold text-muted-foreground">
+                金額資訊
+              </p>
+            </div>
+
+            <div className="md:col-span-2 grid gap-4 md:grid-cols-4">
+              <Field label="成本">
+                <input
+                  type="number"
+                  {...register("cost", { valueAsNumber: true, required: true })}
+                  className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
+                />
+              </Field>
+
+              <Field label="售價">
+                <input
+                  type="number"
+                  {...register("price", {
+                    valueAsNumber: true,
+                    required: true,
+                  })}
+                  className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
+                />
+              </Field>
+
+              <Field label="店到店運費">
+                <input
+                  type="number"
+                  {...register("domesticShippingFee", {
+                    valueAsNumber: true,
+                    required: true,
+                  })}
+                  className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
+                />
+              </Field>
+
+              <Field label="收益">
+                <input
+                  type="number"
+                  {...register("revenue", {
+                    valueAsNumber: true,
+                    required: true,
+                  })}
+                  readOnly
+                  className="w-full rounded-md border border-input bg-muted px-3 py-2 text-sm"
+                />
+              </Field>
+            </div>
+
+            <div className="md:col-span-2 mt-2">
+              <p className="text-xs font-semibold text-muted-foreground">
+                訂單狀態
+              </p>
+            </div>
+
+            <Field label="收款狀態">
+              <Controller
+                control={control}
+                name="paymentStatus"
+                rules={{ required: true }}
+                render={({ field }) => (
+                  <Select
+                    value={field.value}
+                    onValueChange={(value) => {
+                      if (value) field.onChange(value);
+                    }}
+                  >
+                  <SelectTrigger
+                    className={`w-full ${paymentStatusTextClass(field.value)}`}
+                    aria-label="收款狀態"
+                  >
+                      <SelectValue placeholder="收款狀態" />
+                    </SelectTrigger>
+                    <SelectContent>
+                    <SelectItem value="未收款" className="text-red-500">
+                      未收款
+                    </SelectItem>
+                    <SelectItem value="已收款" className="text-amber-500">
+                      已收款
+                    </SelectItem>
+                    <SelectItem value="已入帳" className="text-green-500">
+                      已入帳
+                    </SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            </Field>
+
+            <Field label="商品狀態">
+              <Controller
+                control={control}
+                name="productStatus"
+                rules={{ required: true }}
+                render={({ field }) => (
+                  <Select
+                    value={field.value}
+                    onValueChange={(value) => {
+                      if (value) field.onChange(value);
+                    }}
+                  >
+                    <SelectTrigger className="w-full" aria-label="商品狀態">
+                      <SelectValue placeholder="商品狀態" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="未購買">未購買</SelectItem>
+                      <SelectItem value="已購賣">已購賣</SelectItem>
+                      <SelectItem value="到虹家">到虹家</SelectItem>
+                      <SelectItem value="集運回台">集運回台</SelectItem>
+                      <SelectItem value="到台灣">到台灣</SelectItem>
+                      <SelectItem value="已出貨">已出貨</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            </Field>
+
+            <Field label="包裹編號">
+              <Controller
+                control={control}
+                name="packageNumber"
+                rules={{ required: true }}
+                render={({ field }) => (
+                  <Select
+                    value={field.value}
+                    onValueChange={(value) => {
+                      if (value) field.onChange(value);
+                    }}
+                  >
+                    <SelectTrigger className="w-full" aria-label="包裹編號">
+                      <SelectValue placeholder="包裹編號" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="未指定">未指定</SelectItem>
+                      {packageNumberOptions.map((packageNumber) => (
+                        <SelectItem key={packageNumber} value={packageNumber}>
+                          {packageNumber}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            </Field>
+            <div className="md:col-span-2 mt-2 flex justify-end border-t pt-4">
+              <Button
+                type="submit"
+                disabled={!isDirty || formDisabled || isSaving}
+              >
+                {isSaving ? "更新中…" : "更新"}
+              </Button>
+            </div>
           </div>
-
-          <div className="md:col-span-2 mt-2">
-            <p className="text-xs font-semibold text-muted-foreground">訂單狀態</p>
-          </div>
-
-          <Field label="收款狀態">
-            <Controller
-              control={control}
-              name="paymentStatus"
-              rules={{ required: true }}
-              render={({ field }) => (
-                <Select
-                  value={field.value}
-                  onValueChange={(value) => {
-                    if (value) field.onChange(value);
-                  }}
-                >
-                  <SelectTrigger className="w-full" aria-label="收款狀態">
-                    <SelectValue placeholder="收款狀態" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="未收款">未收款</SelectItem>
-                    <SelectItem value="已收款">已收款</SelectItem>
-                    <SelectItem value="已入帳">已入帳</SelectItem>
-                  </SelectContent>
-                </Select>
-              )}
-            />
-          </Field>
-
-          <Field label="商品狀態">
-            <Controller
-              control={control}
-              name="productStatus"
-              rules={{ required: true }}
-              render={({ field }) => (
-                <Select
-                  value={field.value}
-                  onValueChange={(value) => {
-                    if (value) field.onChange(value);
-                  }}
-                >
-                  <SelectTrigger className="w-full" aria-label="商品狀態">
-                    <SelectValue placeholder="商品狀態" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="未購買">未購買</SelectItem>
-                    <SelectItem value="已購賣">已購賣</SelectItem>
-                    <SelectItem value="到虹家">到虹家</SelectItem>
-                    <SelectItem value="集運回台">集運回台</SelectItem>
-                    <SelectItem value="到台灣">到台灣</SelectItem>
-                    <SelectItem value="已出貨">已出貨</SelectItem>
-                  </SelectContent>
-                </Select>
-              )}
-            />
-          </Field>
-
-          <Field label="包裹編號">
-            <Controller
-              control={control}
-              name="packageNumber"
-              rules={{ required: true }}
-              render={({ field }) => (
-                <Select
-                  value={field.value}
-                  onValueChange={(value) => {
-                    if (value) field.onChange(value);
-                  }}
-                >
-                  <SelectTrigger className="w-full" aria-label="包裹編號">
-                    <SelectValue placeholder="包裹編號" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="未指定">未指定</SelectItem>
-                    {packageNumberOptions.map((packageNumber) => (
-                      <SelectItem key={packageNumber} value={packageNumber}>
-                        {packageNumber}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            />
-          </Field>
-          <div className="md:col-span-2 mt-2 flex justify-end border-t pt-4">
-            <Button type="submit" disabled={!isDirty || formDisabled || isSaving}>
-              {isSaving ? "更新中…" : "更新"}
-            </Button>
-          </div>
-        </div>
         </fieldset>
       </form>
     </main>

@@ -233,6 +233,8 @@ export type FetchOrdersForPackagePageOptions = {
   itemSearch?: string;
   /** `全部` | numeric (`1`, `2`) | legacy `package_number`（僅限已指派 `package_id`） */
   packageFilter?: string;
+  page?: number;
+  pageSize?: number;
 };
 
 /**
@@ -243,16 +245,19 @@ export async function fetchOrdersForPackagePage(
   options: FetchOrdersForPackagePageOptions = {},
 ): Promise<{
   data: OrderWithPackageNumber[] | null;
+  count: number;
   error: { message: string } | null;
 }> {
   const raw = options.packageFilter?.trim() ?? "全部";
   const pkgFilter = raw === "未指定" ? "全部" : raw;
+  const page = Math.max(1, options.page ?? 1);
+  const pageSize = Math.min(200, Math.max(1, options.pageSize ?? 15));
 
   const { data: pkgs, error: pkgsError } = await supabase
     .from("packages")
     .select("id, number");
   if (pkgsError) {
-    return { data: null, error: { message: pkgsError.message } };
+    return { data: null, count: 0, error: { message: pkgsError.message } };
   }
   const packageIds = new Set((pkgs ?? []).map((p) => p.id));
   const packageNumbers = new Set((pkgs ?? []).map((p) => String(p.number)));
@@ -272,7 +277,7 @@ export async function fetchOrdersForPackagePage(
   const { data, error } = await query;
 
   if (error) {
-    return { data: null, error: { message: error.message } };
+    return { data: null, count: 0, error: { message: error.message } };
   }
 
   const assigned = ((data as OrderWithPackageNumber[] | null) ?? []).filter((row) => {
@@ -304,10 +309,10 @@ export async function fetchOrdersForPackagePage(
           return row.package_number === pkgFilter;
         });
 
-  return {
-    data: filtered,
-    error: null,
-  };
+  const count = filtered.length;
+  const from = (page - 1) * pageSize;
+  const paginated = filtered.slice(from, from + pageSize);
+  return { data: paginated, count, error: null };
 }
 
 export type OrderListFieldsPatch = {
