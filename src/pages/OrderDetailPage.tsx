@@ -2,7 +2,12 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { fetchOrderById, orderRecordToDetailForm, type OrderDetailFormValues } from "@/lib/orders";
+import {
+  fetchOrderById,
+  orderRecordToDetailForm,
+  updateOrderFromDetailForm,
+  type OrderDetailFormValues,
+} from "@/lib/orders";
 import {
   Select,
   SelectContent,
@@ -57,6 +62,8 @@ function OrderDetailPage() {
   });
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   const {
     register,
@@ -128,8 +135,21 @@ function OrderDetailPage() {
     };
   }, [orderId, reset]);
 
-  const onSubmit = (values: OrderDetailFormValues) => {
-    reset(values);
+  const onSubmit = async (values: OrderDetailFormValues) => {
+    if (!orderId) {
+      return;
+    }
+    setSaveError(null);
+    setIsSaving(true);
+    const { data, error } = await updateOrderFromDetailForm(orderId, values);
+    setIsSaving(false);
+    if (error) {
+      setSaveError(error.message);
+      return;
+    }
+    if (data) {
+      reset(orderRecordToDetailForm(data));
+    }
   };
 
   const formDisabled = isLoading || !!loadError;
@@ -150,9 +170,14 @@ function OrderDetailPage() {
           {loadError}
         </p>
       )}
+      {saveError && (
+        <p className="mb-4 text-sm text-destructive" role="alert">
+          {saveError}
+        </p>
+      )}
 
       <form onSubmit={handleSubmit(onSubmit)} className="mb-6 space-y-4">
-        <fieldset disabled={formDisabled} className="contents">
+        <fieldset disabled={formDisabled || isSaving} className="contents">
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="品項">
             <input
@@ -308,8 +333,8 @@ function OrderDetailPage() {
         </div>
 
         <div className="flex justify-end">
-          <Button type="submit" disabled={!isDirty || formDisabled}>
-            更新
+          <Button type="submit" disabled={!isDirty || formDisabled || isSaving}>
+            {isSaving ? "更新中…" : "更新"}
           </Button>
         </div>
         </fieldset>

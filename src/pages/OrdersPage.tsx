@@ -6,6 +6,7 @@ import {
   FolderInputIcon,
   Trash2Icon,
 } from "lucide-react";
+import { useQueryStates } from "nuqs";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +20,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Popover,
   PopoverContent,
@@ -40,12 +42,21 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  createOrder,
+  deleteOrderById,
   fetchOrders,
+  fetchOrdersTotals,
   orderRecordToTableRow,
+  updateOrderFields,
   type OrdersTableRow as OrderRow,
 } from "@/lib/orders";
+import {
+  ordersListSearchParams,
+  type OrdersListUrlState,
+} from "@/lib/orders-list-url";
 
 const PACKAGE_OPTIONS_STORAGE_KEY = "package-number-options";
+const ORDERS_PAGE_SIZE = 5;
 
 function OrdersPage() {
   const [isCreatePackageDialogOpen, setIsCreatePackageDialogOpen] =
@@ -81,36 +92,119 @@ function OrdersPage() {
 
     return ["PKG-001", "PKG-002", "PKG-003"];
   });
+  const [listUrl, setListUrl] = useQueryStates(ordersListSearchParams, {
+    history: "push",
+  });
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [draftFilterPaymentStatus, setDraftFilterPaymentStatus] =
+    useState<OrdersListUrlState["payment"]>("全部");
+  const [draftFilterProductStatus, setDraftFilterProductStatus] =
+    useState<OrdersListUrlState["product"]>("全部");
+  const [draftFilterPackageNumber, setDraftFilterPackageNumber] =
+    useState<string>("全部");
   const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [totalRowCount, setTotalRowCount] = useState(0);
+  const [aggregateTotalCost, setAggregateTotalCost] = useState(0);
+  const [aggregateTotalProfit, setAggregateTotalProfit] = useState(0);
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [ordersError, setOrdersError] = useState<string | null>(null);
-  const [searchItem, setSearchItem] = useState("");
-  /** Last item substring sent to the server (updated on Enter in the search field). */
-  const [appliedItemSearch, setAppliedItemSearch] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
+  const [listFieldError, setListFieldError] = useState<string | null>(null);
+  const [createOrderError, setCreateOrderError] = useState<string | null>(null);
+  const [isCreateOrderSubmitting, setIsCreateOrderSubmitting] = useState(false);
+  const [deleteOrderError, setDeleteOrderError] = useState<string | null>(null);
+  const [isDeleteOrderSubmitting, setIsDeleteOrderSubmitting] = useState(false);
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
+  const [isMoveToPopoverOpen, setIsMoveToPopoverOpen] = useState(false);
+  const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
+  const [bulkPackageNumber, setBulkPackageNumber] = useState("未指定");
+  const [newOrder, setNewOrder] = useState<Omit<OrderRow, "id">>({
+    item: "",
+    purchaseDate: new Date().toISOString().slice(0, 10),
+    buyer: "",
+    payer: "虹",
+    cost: "0",
+    price: "0",
+    revenue: "0",
+    paymentStatus: "未收款",
+    productStatus: "未購買",
+    packageNumber: "未指定",
+  });
 
-  const loadOrders = useCallback(async () => {
+  const patchListUrl = useCallback(
+    (patch: Partial<OrdersListUrlState>, opts?: { replace?: boolean }) => {
+      void setListUrl(patch, {
+        history: opts?.replace === true ? "replace" : "push",
+      });
+    },
+    [setListUrl]
+  );
+
+  const reloadOrdersList = useCallback(() => {
+    setRefreshKey((k) => k + 1);
+  }, []);
+
+  const { q, payment, product, pkg, sort, page } = listUrl;
+
+  useEffect(() => {
+    let cancelled = false;
+    const state = { q, payment, product, pkg, sort, page };
+
     startTransition(() => {
       setOrdersError(null);
       setOrdersLoading(true);
-      setCurrentPage(1);
     });
-    const { data, error } = await fetchOrders({
-      itemSearch: appliedItemSearch || undefined,
-    });
-    startTransition(() => {
-      setOrdersLoading(false);
-      if (error) {
-        setOrdersError(error.message);
+
+    const listQueryFilter = {
+      itemSearch: state.q || undefined,
+      paymentStatus: state.payment,
+      productStatus: state.product,
+      packageNumber: state.pkg,
+    };
+
+    void (async () => {
+      const [ordersRes, totalsRes] = await Promise.all([
+        fetchOrders({
+          ...listQueryFilter,
+          sortPurchaseDate: state.sort,
+          page: state.page,
+          pageSize: ORDERS_PAGE_SIZE,
+        }),
+        fetchOrdersTotals(listQueryFilter),
+      ]);
+
+      if (cancelled) {
         return;
       }
-      setOrders((data ?? []).map(orderRecordToTableRow));
-    });
-  }, [appliedItemSearch]);
 
-  useEffect(() => {
-    void loadOrders();
-  }, [loadOrders]);
+      startTransition(() => {
+        setOrdersLoading(false);
+        if (ordersRes.error) {
+          setOrdersError(ordersRes.error.message);
+          return;
+        }
+        if (totalsRes.error) {
+          setOrdersError(totalsRes.error.message);
+          return;
+        }
+        setOrders((ordersRes.data ?? []).map(orderRecordToTableRow));
+        setTotalRowCount(ordersRes.count);
+        setAggregateTotalCost(totalsRes.totalCost);
+        setAggregateTotalProfit(totalsRes.totalProfit);
+        const totalPages = Math.max(
+          1,
+          Math.ceil(ordersRes.count / ORDERS_PAGE_SIZE)
+        );
+        const nextPage = Math.min(state.page, totalPages);
+        if (nextPage !== state.page) {
+          void setListUrl({ page: nextPage }, { history: "replace" });
+        }
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [q, payment, product, pkg, sort, page, refreshKey, setListUrl]);
 
   useEffect(() => {
     const extras = orders
@@ -136,47 +230,7 @@ function OrdersPage() {
       });
     });
   }, [orders]);
-  const [filterPaymentStatus, setFilterPaymentStatus] = useState("全部");
-  const [filterProductStatus, setFilterProductStatus] = useState("全部");
-  const [filterPackageNumber, setFilterPackageNumber] = useState("全部");
-  const [draftFilterPaymentStatus, setDraftFilterPaymentStatus] =
-    useState("全部");
-  const [draftFilterProductStatus, setDraftFilterProductStatus] =
-    useState("全部");
-  const [draftFilterPackageNumber, setDraftFilterPackageNumber] =
-    useState("全部");
-  const [dateSortDirection, setDateSortDirection] = useState<"asc" | "desc">(
-    "desc"
-  );
-  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
-  const [isMoveToPopoverOpen, setIsMoveToPopoverOpen] = useState(false);
-  const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
-  const [bulkPackageNumber, setBulkPackageNumber] = useState("未指定");
-  const pageSize = 5;
-  const [newOrder, setNewOrder] = useState<Omit<OrderRow, "id">>({
-    item: "",
-    purchaseDate: "2026-04-29",
-    buyer: "",
-    payer: "虹",
-    cost: "0",
-    price: "0",
-    revenue: "0",
-    paymentStatus: "未收款",
-    productStatus: "未購買",
-    packageNumber: "未指定",
-  });
 
-  const updateOrder = <K extends keyof OrderRow>(
-    orderId: string,
-    field: K,
-    value: OrderRow[K]
-  ) => {
-    setOrders((currentOrders) =>
-      currentOrders.map((order) =>
-        order.id === orderId ? { ...order, [field]: value } : order
-      )
-    );
-  };
   const handleCreatePackageNumber = () => {
     const trimmedPackageNumber = newPackageNumber.trim();
     if (!trimmedPackageNumber) {
@@ -199,19 +253,33 @@ function OrdersPage() {
     setNewPackageNumber("");
     setIsCreatePackageDialogOpen(false);
   };
+
+  const persistListPatch = async (
+    orderId: string,
+    patch: Parameters<typeof updateOrderFields>[1]
+  ) => {
+    setListFieldError(null);
+    const { error } = await updateOrderFields(orderId, patch);
+    if (error) {
+      setListFieldError(error.message);
+      return;
+    }
+    reloadOrdersList();
+  };
+
   const handlePackageNumberChange = (orderId: string, value: string | null) => {
     if (value) {
-      updateOrder(orderId, "packageNumber", value);
+      void persistListPatch(orderId, { packageNumber: value });
     }
   };
   const handleFilterPaymentStatusChange = (value: string | null) => {
     if (value) {
-      setDraftFilterPaymentStatus(value);
+      setDraftFilterPaymentStatus(value as OrdersListUrlState["payment"]);
     }
   };
   const handleFilterProductStatusChange = (value: string | null) => {
     if (value) {
-      setDraftFilterProductStatus(value);
+      setDraftFilterProductStatus(value as OrdersListUrlState["product"]);
     }
   };
   const handleFilterPackageNumberChange = (value: string | null) => {
@@ -222,59 +290,72 @@ function OrdersPage() {
   const handleFilterPopoverOpenChange = (open: boolean) => {
     setIsFilterPopoverOpen(open);
     if (open) {
-      setDraftFilterPaymentStatus(filterPaymentStatus);
-      setDraftFilterProductStatus(filterProductStatus);
-      setDraftFilterPackageNumber(filterPackageNumber);
+      setDraftFilterPaymentStatus(listUrl.payment);
+      setDraftFilterProductStatus(listUrl.product);
+      setDraftFilterPackageNumber(listUrl.pkg);
     }
   };
   const applyFilters = () => {
-    setFilterPaymentStatus(draftFilterPaymentStatus);
-    setFilterProductStatus(draftFilterProductStatus);
-    setFilterPackageNumber(draftFilterPackageNumber);
-    setCurrentPage(1);
+    patchListUrl({
+      payment: draftFilterPaymentStatus,
+      product: draftFilterProductStatus,
+      pkg: draftFilterPackageNumber,
+      page: 1,
+    });
     setIsFilterPopoverOpen(false);
   };
-  const handleDeleteOrder = (orderId: string) => {
-    setOrders((currentOrders) =>
-      currentOrders.filter((order) => order.id !== orderId)
-    );
-  };
   const openDeleteDialog = (orderId: string) => {
+    setDeleteOrderError(null);
     setOrderToDeleteId(orderId);
     setIsDeleteDialogOpen(true);
   };
-  const confirmDeleteOrder = () => {
+  const confirmDeleteOrder = async () => {
     if (!orderToDeleteId) return;
-    handleDeleteOrder(orderToDeleteId);
+    setDeleteOrderError(null);
+    setIsDeleteOrderSubmitting(true);
+    const { error } = await deleteOrderById(orderToDeleteId);
+    setIsDeleteOrderSubmitting(false);
+    if (error) {
+      setDeleteOrderError(error.message);
+      return;
+    }
     setOrderToDeleteId(null);
     setIsDeleteDialogOpen(false);
+    reloadOrdersList();
   };
-  const handleCreateOrder = () => {
+
+  const handleCreateOrder = async () => {
     const item = newOrder.item.trim();
     const buyer = newOrder.buyer.trim();
     if (!item || !buyer) {
       return;
     }
 
-    const nextId = crypto.randomUUID();
-
     const costNumber = Number.parseFloat(newOrder.cost);
     const priceNumber = Number.parseFloat(newOrder.price);
-    const calculatedRevenue =
-      (Number.isNaN(priceNumber) ? 0 : priceNumber) -
-      (Number.isNaN(costNumber) ? 0 : costNumber);
 
-    setOrders((currentOrders) => [
-      ...currentOrders,
-      {
-        ...newOrder,
-        revenue: String(calculatedRevenue),
-        id: nextId,
-      },
-    ]);
+    setCreateOrderError(null);
+    setIsCreateOrderSubmitting(true);
+    const { error } = await createOrder({
+      item,
+      purchaseDate: newOrder.purchaseDate,
+      buyer,
+      payer: newOrder.payer,
+      cost: Number.isNaN(costNumber) ? 0 : costNumber,
+      price: Number.isNaN(priceNumber) ? 0 : priceNumber,
+      paymentStatus: newOrder.paymentStatus,
+      productStatus: newOrder.productStatus,
+      packageNumber: newOrder.packageNumber,
+    });
+    setIsCreateOrderSubmitting(false);
+    if (error) {
+      setCreateOrderError(error.message);
+      return;
+    }
+
     setNewOrder({
       item: "",
-      purchaseDate: "2026-04-29",
+      purchaseDate: new Date().toISOString().slice(0, 10),
       buyer: "",
       payer: "虹",
       cost: "0",
@@ -285,53 +366,16 @@ function OrdersPage() {
       packageNumber: "未指定",
     });
     setIsCreateOrderDialogOpen(false);
+    patchListUrl({ page: 1 });
+    reloadOrdersList();
   };
 
-  const filteredOrders = orders.filter((order) => {
-    const matchedItem = order.item
-      .toLowerCase()
-      .includes(searchItem.toLowerCase());
-    const matchedPaymentStatus =
-      filterPaymentStatus === "全部" ||
-      order.paymentStatus === filterPaymentStatus;
-    const matchedProductStatus =
-      filterProductStatus === "全部" ||
-      order.productStatus === filterProductStatus;
-    const matchedPackageNumber =
-      filterPackageNumber === "全部" ||
-      order.packageNumber === filterPackageNumber;
-
-    return (
-      matchedItem &&
-      matchedPaymentStatus &&
-      matchedProductStatus &&
-      matchedPackageNumber
-    );
-  });
-  const sortedFilteredOrders = [...filteredOrders].sort((a, b) => {
-    const timeA = new Date(a.purchaseDate).getTime();
-    const timeB = new Date(b.purchaseDate).getTime();
-    return dateSortDirection === "asc" ? timeA - timeB : timeB - timeA;
-  });
-  const totalProfit = filteredOrders.reduce((sum, order) => {
-    const revenue = Number.parseFloat(order.revenue);
-    return Number.isNaN(revenue) ? sum : sum + revenue;
-  }, 0);
-  const totalCost = filteredOrders.reduce((sum, order) => {
-    const cost = Number.parseFloat(order.cost);
-    return Number.isNaN(cost) ? sum : sum + cost;
-  }, 0);
-  const totalPages = Math.max(
-    1,
-    Math.ceil(sortedFilteredOrders.length / pageSize)
-  );
-  const safeCurrentPage = Math.min(currentPage, totalPages);
-  const startIndex = (safeCurrentPage - 1) * pageSize;
-  const paginatedOrders = sortedFilteredOrders.slice(
-    startIndex,
-    startIndex + pageSize
-  );
+  const totalPages = Math.max(1, Math.ceil(totalRowCount / ORDERS_PAGE_SIZE));
+  const safeCurrentPage = Math.min(listUrl.page, totalPages);
+  const paginatedOrders = orders;
   const paginatedOrderIds = paginatedOrders.map((order) => order.id);
+  const totalCost = aggregateTotalCost;
+  const totalProfit = aggregateTotalProfit;
   const isAllCurrentPageSelected =
     paginatedOrderIds.length > 0 &&
     paginatedOrderIds.every((orderId) => selectedOrderIds.includes(orderId));
@@ -359,25 +403,27 @@ function OrdersPage() {
       return currentSelected.filter((id) => id !== orderId);
     });
   };
-  const applyBulkPackageNumber = () => {
-    setOrders((currentOrders) =>
-      currentOrders.map((order) =>
-        selectedOrderIds.includes(order.id)
-          ? { ...order, packageNumber: bulkPackageNumber }
-          : order
-      )
+  const applyBulkPackageNumber = async () => {
+    const ids = selectedOrderIds;
+    if (ids.length === 0) {
+      return;
+    }
+    setListFieldError(null);
+    const results = await Promise.all(
+      ids.map((id) => updateOrderFields(id, { packageNumber: bulkPackageNumber }))
     );
+    const failed = results.find((r) => r.error);
+    if (failed?.error) {
+      setListFieldError(failed.error.message);
+      return;
+    }
     setSelectedOrderIds([]);
     setIsMoveToPopoverOpen(false);
+    reloadOrdersList();
   };
 
   return (
     <main style={{ padding: "2rem", fontFamily: "system-ui, sans-serif" }}>
-      {ordersLoading && (
-        <p className="mb-4 text-sm text-muted-foreground" role="status">
-          載入訂單中…
-        </p>
-      )}
       {ordersError && (
         <div
           className="mb-4 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
@@ -390,10 +436,19 @@ function OrdersPage() {
             variant="outline"
             size="sm"
             className="mt-2"
-            onClick={() => void loadOrders()}
+            onClick={() => reloadOrdersList()}
           >
             重試
           </Button>
+        </div>
+      )}
+      {listFieldError && (
+        <div
+          className="mb-4 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          role="alert"
+        >
+          <p className="font-medium">更新失敗</p>
+          <p className="mt-1 text-destructive/90">{listFieldError}</p>
         </div>
       )}
       <div className="mb-4 flex items-center justify-between gap-2">
@@ -401,7 +456,12 @@ function OrdersPage() {
         <div className="flex items-center gap-2">
           <Dialog
             open={isCreateOrderDialogOpen}
-            onOpenChange={setIsCreateOrderDialogOpen}
+            onOpenChange={(open) => {
+              setIsCreateOrderDialogOpen(open);
+              if (!open) {
+                setCreateOrderError(null);
+              }
+            }}
           >
             <DialogTrigger render={<Button type="button">建立新訂單</Button>} />
             <DialogContent className="max-w-xl">
@@ -409,6 +469,11 @@ function OrdersPage() {
                 <DialogTitle>建立新訂單</DialogTitle>
                 <DialogDescription>請填寫訂單資訊。</DialogDescription>
               </DialogHeader>
+              {createOrderError && (
+                <p className="text-sm text-destructive" role="alert">
+                  {createOrderError}
+                </p>
+              )}
               <div className="grid gap-3 py-2 md:grid-cols-2">
                 <div className="space-y-1">
                   <label
@@ -625,10 +690,14 @@ function OrdersPage() {
                 <DialogClose render={<Button variant="outline">取消</Button>} />
                 <Button
                   type="button"
-                  onClick={handleCreateOrder}
-                  disabled={!newOrder.item.trim() || !newOrder.buyer.trim()}
+                  onClick={() => void handleCreateOrder()}
+                  disabled={
+                    !newOrder.item.trim() ||
+                    !newOrder.buyer.trim() ||
+                    isCreateOrderSubmitting
+                  }
                 >
-                  建立訂單
+                  {isCreateOrderSubmitting ? "建立中…" : "建立訂單"}
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -671,12 +740,15 @@ function OrdersPage() {
 
       <div className="mb-4 flex items-center gap-2">
         <Input
-          value={searchItem}
-          onChange={(event) => setSearchItem(event.target.value)}
+          key={listUrl.q}
+          defaultValue={listUrl.q}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
               event.preventDefault();
-              setAppliedItemSearch(searchItem.trim());
+              patchListUrl({
+                q: event.currentTarget.value.trim(),
+                page: 1,
+              });
             }
           }}
           placeholder="搜尋品項（按 Enter）"
@@ -821,52 +893,61 @@ function OrdersPage() {
       </div>
 
       <div className="mb-4 flex flex-wrap gap-2">
-        {appliedItemSearch !== "" && (
+        {listUrl.q !== "" && (
           <button
             type="button"
             onClick={() => {
-              setSearchItem("");
-              setAppliedItemSearch("");
+              patchListUrl({ q: "", page: 1 });
             }}
             className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-3 py-1 text-xs"
           >
-            品項: {appliedItemSearch}
+            品項: {listUrl.q}
             <span aria-hidden="true">×</span>
           </button>
         )}
-        {filterPaymentStatus !== "全部" && (
+        {listUrl.payment !== "全部" && (
           <button
             type="button"
-            onClick={() => setFilterPaymentStatus("全部")}
+            onClick={() => {
+              patchListUrl({ payment: "全部", page: 1 });
+            }}
             className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-3 py-1 text-xs"
           >
-            收款狀態: {filterPaymentStatus}
+            收款狀態: {listUrl.payment}
             <span aria-hidden="true">×</span>
           </button>
         )}
-        {filterProductStatus !== "全部" && (
+        {listUrl.product !== "全部" && (
           <button
             type="button"
-            onClick={() => setFilterProductStatus("全部")}
+            onClick={() => {
+              patchListUrl({ product: "全部", page: 1 });
+            }}
             className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-3 py-1 text-xs"
           >
-            商品狀態: {filterProductStatus}
+            商品狀態: {listUrl.product}
             <span aria-hidden="true">×</span>
           </button>
         )}
-        {filterPackageNumber !== "全部" && (
+        {listUrl.pkg !== "全部" && (
           <button
             type="button"
-            onClick={() => setFilterPackageNumber("全部")}
+            onClick={() => {
+              patchListUrl({ pkg: "全部", page: 1 });
+            }}
             className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-3 py-1 text-xs"
           >
-            包裹編號: {filterPackageNumber}
+            包裹編號: {listUrl.pkg}
             <span aria-hidden="true">×</span>
           </button>
         )}
       </div>
 
-      <div className="my-4 overflow-x-auto">
+      <div
+        className="my-4 overflow-x-auto"
+        aria-busy={ordersLoading}
+        aria-label={ordersLoading ? "載入訂單列表中" : undefined}
+      >
         <Table className="min-w-[1200px]">
           <TableHeader>
             <TableRow>
@@ -881,6 +962,7 @@ function OrdersPage() {
                     toggleSelectAllCurrentPage(event.target.checked)
                   }
                   aria-label="全選目前頁面訂單"
+                  disabled={ordersLoading}
                 />
               </TableHead>
               <TableHead>訂單編號</TableHead>
@@ -888,17 +970,19 @@ function OrdersPage() {
               <TableHead>
                 <button
                   type="button"
-                  onClick={() =>
-                    setDateSortDirection((current) =>
-                      current === "asc" ? "desc" : "asc"
-                    )
-                  }
+                  onClick={() => {
+                    patchListUrl({
+                      page: 1,
+                      sort: listUrl.sort === "asc" ? "desc" : "asc",
+                    });
+                  }}
                   className="inline-flex items-center gap-1 font-medium"
+                  disabled={ordersLoading}
                 >
                   購買日期
                   <ArrowUpDownIcon className="h-3.5 w-3.5" />
                   <span className="text-xs text-muted-foreground">
-                    {dateSortDirection === "asc" ? "舊→新" : "新→舊"}
+                    {listUrl.sort === "asc" ? "舊→新" : "新→舊"}
                   </span>
                 </button>
               </TableHead>
@@ -914,7 +998,55 @@ function OrdersPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {paginatedOrders.map((order) => (
+            {ordersLoading &&
+              Array.from({ length: ORDERS_PAGE_SIZE }, (_, rowIndex) => (
+                <TableRow key={`skeleton-${rowIndex}`}>
+                  <TableCell>
+                    <Skeleton className="h-4 w-4 rounded-sm" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-28" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-44" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-24" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-20" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-8 w-24" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-14" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-14" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-14" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-8 w-28" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-8 w-32" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-8 w-32" />
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex gap-2">
+                      <Skeleton className="h-8 w-8 rounded-md" />
+                      <Skeleton className="h-8 w-8 rounded-md" />
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            {!ordersLoading &&
+              paginatedOrders.map((order) => (
               <TableRow key={order.id}>
                 <TableCell>
                   <input
@@ -935,7 +1067,7 @@ function OrdersPage() {
                     value={order.payer}
                     onValueChange={(value) => {
                       if (value === "虹" || value === "藍") {
-                        updateOrder(order.id, "payer", value);
+                        void persistListPatch(order.id, { payer: value });
                       }
                     }}
                   >
@@ -960,7 +1092,9 @@ function OrdersPage() {
                         value === "已收款" ||
                         value === "已入帳"
                       ) {
-                        updateOrder(order.id, "paymentStatus", value);
+                        void persistListPatch(order.id, {
+                          paymentStatus: value,
+                        });
                       }
                     }}
                   >
@@ -986,7 +1120,9 @@ function OrdersPage() {
                         value === "到台灣" ||
                         value === "已出貨"
                       ) {
-                        updateOrder(order.id, "productStatus", value);
+                        void persistListPatch(order.id, {
+                          productStatus: value,
+                        });
                       }
                     }}
                   >
@@ -1046,7 +1182,16 @@ function OrdersPage() {
         </Table>
       </div>
 
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+      <Dialog
+        open={isDeleteDialogOpen}
+        onOpenChange={(open) => {
+          setIsDeleteDialogOpen(open);
+          if (!open) {
+            setDeleteOrderError(null);
+            setOrderToDeleteId(null);
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>確認刪除</DialogTitle>
@@ -1054,6 +1199,11 @@ function OrdersPage() {
               確定要刪除這筆訂單嗎？此操作無法復原。
             </DialogDescription>
           </DialogHeader>
+          {deleteOrderError && (
+            <p className="text-sm text-destructive" role="alert">
+              {deleteOrderError}
+            </p>
+          )}
           <DialogFooter>
             <DialogClose
               render={
@@ -1061,6 +1211,7 @@ function OrdersPage() {
                   type="button"
                   variant="outline"
                   onClick={() => setOrderToDeleteId(null)}
+                  disabled={isDeleteOrderSubmitting}
                 >
                   取消
                 </Button>
@@ -1069,9 +1220,10 @@ function OrdersPage() {
             <Button
               type="button"
               variant="destructive"
-              onClick={confirmDeleteOrder}
+              onClick={() => void confirmDeleteOrder()}
+              disabled={isDeleteOrderSubmitting}
             >
-              確認刪除
+              {isDeleteOrderSubmitting ? "刪除中…" : "確認刪除"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1079,16 +1231,33 @@ function OrdersPage() {
 
       <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-4 text-sm">
-          <p>
-            總成本（依目前篩選）:{" "}
-            <span className="font-semibold">{totalCost.toLocaleString()}</span>
-          </p>
-          <p>
-            總收益（依目前篩選）:{" "}
-            <span className="font-semibold">
-              {totalProfit.toLocaleString()}
-            </span>
-          </p>
+          {ordersLoading ? (
+            <>
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">總成本（依目前篩選）:</span>
+                <Skeleton className="h-5 w-24" />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-muted-foreground">總收益（依目前篩選）:</span>
+                <Skeleton className="h-5 w-24" />
+              </div>
+            </>
+          ) : (
+            <>
+              <p>
+                總成本（依目前篩選）:{" "}
+                <span className="font-semibold">
+                  {totalCost.toLocaleString()}
+                </span>
+              </p>
+              <p>
+                總收益（依目前篩選）:{" "}
+                <span className="font-semibold">
+                  {totalProfit.toLocaleString()}
+                </span>
+              </p>
+            </>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -1096,22 +1265,30 @@ function OrdersPage() {
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => setCurrentPage(Math.max(1, safeCurrentPage - 1))}
-            disabled={safeCurrentPage === 1}
+            onClick={() =>
+              patchListUrl({ page: Math.max(1, safeCurrentPage - 1) })
+            }
+            disabled={ordersLoading || safeCurrentPage === 1}
           >
             上一頁
           </Button>
-          <span className="text-sm text-muted-foreground">
-            第 {safeCurrentPage} / {totalPages} 頁
-          </span>
+          {ordersLoading ? (
+            <Skeleton className="h-5 w-28" />
+          ) : (
+            <span className="text-sm text-muted-foreground">
+              第 {safeCurrentPage} / {totalPages} 頁
+            </span>
+          )}
           <Button
             type="button"
             variant="outline"
             size="sm"
             onClick={() =>
-              setCurrentPage(Math.min(totalPages, safeCurrentPage + 1))
+              patchListUrl({
+                page: Math.min(totalPages, safeCurrentPage + 1),
+              })
             }
-            disabled={safeCurrentPage === totalPages}
+            disabled={ordersLoading || safeCurrentPage === totalPages}
           >
             下一頁
           </Button>
