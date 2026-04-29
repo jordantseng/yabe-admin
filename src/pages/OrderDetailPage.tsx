@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
+import { fetchOrderById, orderRecordToDetailForm, type OrderDetailFormValues } from "@/lib/orders";
 import {
   Select,
   SelectContent,
@@ -10,39 +11,26 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-type OrderDetailFormValues = {
-  item: string;
-  purchaseDate: string;
-  buyer: string;
-  payer: string;
-  cost: number;
-  price: number;
-  revenue: number;
-  paymentStatus: string;
-  productStatus: string;
-  packageNumber: string;
-};
-
-const initialOrderDetail: OrderDetailFormValues = {
-  item: "Nike Air Max",
-  purchaseDate: "2026-04-28",
-  buyer: "王小明",
-  payer: "虹",
-  cost: 2500,
-  price: 3200,
-  revenue: 700,
-  paymentStatus: "未收款",
-  productStatus: "未購買",
-  packageNumber: "PKG-001",
-};
-
 const PACKAGE_OPTIONS_STORAGE_KEY = "package-number-options";
+
+function emptyOrderDetailForm(): OrderDetailFormValues {
+  return {
+    item: "",
+    purchaseDate: new Date().toISOString().slice(0, 10),
+    buyer: "",
+    payer: "虹",
+    cost: 0,
+    price: 0,
+    revenue: 0,
+    paymentStatus: "未收款",
+    productStatus: "未購買",
+    packageNumber: "未指定",
+  };
+}
 
 function OrderDetailPage() {
   const { orderId } = useParams();
-  const [orderDetail, setOrderDetail] =
-    useState<OrderDetailFormValues>(initialOrderDetail);
-  const [packageNumberOptions] = useState(() => {
+  const [packageNumberOptions, setPackageNumberOptions] = useState(() => {
     if (typeof window === "undefined") {
       return ["PKG-001"];
     }
@@ -67,6 +55,8 @@ function OrderDetailPage() {
 
     return ["PKG-001"];
   });
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   const {
     register,
@@ -77,7 +67,7 @@ function OrderDetailPage() {
     setValue,
     formState: { isDirty },
   } = useForm<OrderDetailFormValues>({
-    defaultValues: orderDetail,
+    defaultValues: emptyOrderDetailForm(),
   });
 
   const watchedCost = watch("cost");
@@ -91,10 +81,58 @@ function OrderDetailPage() {
     }
   }, [watchedCost, watchedPrice, watchedRevenue, setValue]);
 
+  useEffect(() => {
+    if (!orderId) {
+      setLoadError("缺少訂單編號");
+      setIsLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoadError(null);
+    setIsLoading(true);
+
+    void (async () => {
+      const { data, error } = await fetchOrderById(orderId);
+      if (cancelled) {
+        return;
+      }
+      setIsLoading(false);
+      if (error) {
+        setLoadError(error.message);
+        reset(emptyOrderDetailForm());
+        return;
+      }
+      if (!data) {
+        setLoadError("找不到此訂單");
+        reset(emptyOrderDetailForm());
+        return;
+      }
+      const values = orderRecordToDetailForm(data);
+      const pkg = values.packageNumber;
+      if (pkg && pkg !== "未指定") {
+        setPackageNumberOptions((prev) => {
+          if (prev.includes(pkg)) {
+            return prev;
+          }
+          const next = [...prev, pkg];
+          window.localStorage.setItem(PACKAGE_OPTIONS_STORAGE_KEY, JSON.stringify(next));
+          return next;
+        });
+      }
+      reset(values);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [orderId, reset]);
+
   const onSubmit = (values: OrderDetailFormValues) => {
-    setOrderDetail(values);
     reset(values);
   };
+
+  const formDisabled = isLoading || !!loadError;
 
   return (
     <main style={{ padding: "2rem", fontFamily: "system-ui, sans-serif" }}>
@@ -102,8 +140,19 @@ function OrderDetailPage() {
       <p className="mb-4 text-sm text-muted-foreground">
         訂單編號：{orderId ?? "N/A"}
       </p>
+      {isLoading && (
+        <p className="mb-4 text-sm text-muted-foreground" role="status">
+          載入中…
+        </p>
+      )}
+      {loadError && (
+        <p className="mb-4 text-sm text-destructive" role="alert">
+          {loadError}
+        </p>
+      )}
 
       <form onSubmit={handleSubmit(onSubmit)} className="mb-6 space-y-4">
+        <fieldset disabled={formDisabled} className="contents">
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="品項">
             <input
@@ -245,6 +294,7 @@ function OrderDetailPage() {
                     <SelectValue placeholder="包裹編號" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="未指定">未指定</SelectItem>
                     {packageNumberOptions.map((packageNumber) => (
                       <SelectItem key={packageNumber} value={packageNumber}>
                         {packageNumber}
@@ -258,10 +308,11 @@ function OrderDetailPage() {
         </div>
 
         <div className="flex justify-end">
-          <Button type="submit" disabled={!isDirty}>
+          <Button type="submit" disabled={!isDirty || formDisabled}>
             更新
           </Button>
         </div>
+        </fieldset>
       </form>
     </main>
   );

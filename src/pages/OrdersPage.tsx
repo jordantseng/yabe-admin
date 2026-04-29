@@ -1,5 +1,11 @@
-import { useState } from "react";
-import { ArrowUpDownIcon, EyeIcon, FilterIcon, FolderInputIcon, Trash2Icon } from "lucide-react";
+import { startTransition, useCallback, useEffect, useState } from "react";
+import {
+  ArrowUpDownIcon,
+  EyeIcon,
+  FilterIcon,
+  FolderInputIcon,
+  Trash2Icon,
+} from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,7 +19,11 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -29,29 +39,17 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  fetchOrders,
+  orderRecordToTableRow,
+  type OrdersTableRow as OrderRow,
+} from "@/lib/orders";
 
 const PACKAGE_OPTIONS_STORAGE_KEY = "package-number-options";
 
-type OrderStatus = "未收款" | "已收款" | "已入帳";
-type ProductStatus = "未購買" | "已購賣" | "到虹家" | "集運回台" | "到台灣" | "已出貨";
-type Payer = "虹" | "藍";
-
-type OrderRow = {
-  id: string;
-  item: string;
-  purchaseDate: string;
-  buyer: string;
-  payer: Payer;
-  cost: string;
-  price: string;
-  revenue: string;
-  paymentStatus: OrderStatus;
-  productStatus: ProductStatus;
-  packageNumber: string;
-};
-
 function OrdersPage() {
-  const [isCreatePackageDialogOpen, setIsCreatePackageDialogOpen] = useState(false);
+  const [isCreatePackageDialogOpen, setIsCreatePackageDialogOpen] =
+    useState(false);
   const [isCreateOrderDialogOpen, setIsCreateOrderDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [orderToDeleteId, setOrderToDeleteId] = useState<string | null>(null);
@@ -61,7 +59,9 @@ function OrdersPage() {
       return ["PKG-001", "PKG-002", "PKG-003"];
     }
 
-    const savedOptions = window.localStorage.getItem(PACKAGE_OPTIONS_STORAGE_KEY);
+    const savedOptions = window.localStorage.getItem(
+      PACKAGE_OPTIONS_STORAGE_KEY
+    );
     if (!savedOptions) {
       return ["PKG-001", "PKG-002", "PKG-003"];
     }
@@ -81,69 +81,73 @@ function OrdersPage() {
 
     return ["PKG-001", "PKG-002", "PKG-003"];
   });
-  const [orders, setOrders] = useState<OrderRow[]>([
-    {
-      id: "1",
-      item: "Nike Air Max",
-      purchaseDate: "2026-04-28",
-      buyer: "王小明",
-      payer: "虹",
-      cost: "2500",
-      price: "3200",
-      revenue: "700",
-      paymentStatus: "未收款",
-      productStatus: "未購買",
-      packageNumber: "PKG-001",
-    },
-    {
-      id: "2",
-      item: "Adidas Samba",
-      purchaseDate: "2026-04-25",
-      buyer: "陳小華",
-      payer: "藍",
-      cost: "2300",
-      price: "3000",
-      revenue: "700",
-      paymentStatus: "已收款",
-      productStatus: "已購賣",
-      packageNumber: "PKG-001",
-    },
-    {
-      id: "3",
-      item: "New Balance 990",
-      purchaseDate: "2026-04-20",
-      buyer: "林美玲",
-      payer: "虹",
-      cost: "4200",
-      price: "5200",
-      revenue: "1000",
-      paymentStatus: "已入帳",
-      productStatus: "到台灣",
-      packageNumber: "PKG-002",
-    },
-    {
-      id: "4",
-      item: "On Cloudmonster",
-      purchaseDate: "2026-04-18",
-      buyer: "張宇",
-      payer: "藍",
-      cost: "3600",
-      price: "4500",
-      revenue: "900",
-      paymentStatus: "未收款",
-      productStatus: "集運回台",
-      packageNumber: "PKG-003",
-    },
-  ]);
+  const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [ordersLoading, setOrdersLoading] = useState(true);
+  const [ordersError, setOrdersError] = useState<string | null>(null);
   const [searchItem, setSearchItem] = useState("");
+  /** Last item substring sent to the server (updated on Enter in the search field). */
+  const [appliedItemSearch, setAppliedItemSearch] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+
+  const loadOrders = useCallback(async () => {
+    startTransition(() => {
+      setOrdersError(null);
+      setOrdersLoading(true);
+      setCurrentPage(1);
+    });
+    const { data, error } = await fetchOrders({
+      itemSearch: appliedItemSearch || undefined,
+    });
+    startTransition(() => {
+      setOrdersLoading(false);
+      if (error) {
+        setOrdersError(error.message);
+        return;
+      }
+      setOrders((data ?? []).map(orderRecordToTableRow));
+    });
+  }, [appliedItemSearch]);
+
+  useEffect(() => {
+    void loadOrders();
+  }, [loadOrders]);
+
+  useEffect(() => {
+    const extras = orders
+      .map((o) => o.packageNumber)
+      .filter((p) => p && p !== "未指定");
+    if (extras.length === 0) {
+      return;
+    }
+    startTransition(() => {
+      setPackageNumberOptions((prev) => {
+        const merged = Array.from(new Set([...prev, ...extras]));
+        if (
+          merged.length === prev.length &&
+          merged.every((v, i) => v === prev[i])
+        ) {
+          return prev;
+        }
+        window.localStorage.setItem(
+          PACKAGE_OPTIONS_STORAGE_KEY,
+          JSON.stringify(merged)
+        );
+        return merged;
+      });
+    });
+  }, [orders]);
   const [filterPaymentStatus, setFilterPaymentStatus] = useState("全部");
   const [filterProductStatus, setFilterProductStatus] = useState("全部");
   const [filterPackageNumber, setFilterPackageNumber] = useState("全部");
-  const [draftFilterPaymentStatus, setDraftFilterPaymentStatus] = useState("全部");
-  const [draftFilterProductStatus, setDraftFilterProductStatus] = useState("全部");
-  const [draftFilterPackageNumber, setDraftFilterPackageNumber] = useState("全部");
-  const [dateSortDirection, setDateSortDirection] = useState<"asc" | "desc">("desc");
-  const [currentPage, setCurrentPage] = useState(1);
+  const [draftFilterPaymentStatus, setDraftFilterPaymentStatus] =
+    useState("全部");
+  const [draftFilterProductStatus, setDraftFilterProductStatus] =
+    useState("全部");
+  const [draftFilterPackageNumber, setDraftFilterPackageNumber] =
+    useState("全部");
+  const [dateSortDirection, setDateSortDirection] = useState<"asc" | "desc">(
+    "desc"
+  );
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
   const [isMoveToPopoverOpen, setIsMoveToPopoverOpen] = useState(false);
   const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
@@ -165,12 +169,12 @@ function OrdersPage() {
   const updateOrder = <K extends keyof OrderRow>(
     orderId: string,
     field: K,
-    value: OrderRow[K],
+    value: OrderRow[K]
   ) => {
     setOrders((currentOrders) =>
       currentOrders.map((order) =>
-        order.id === orderId ? { ...order, [field]: value } : order,
-      ),
+        order.id === orderId ? { ...order, [field]: value } : order
+      )
     );
   };
   const handleCreatePackageNumber = () => {
@@ -187,7 +191,7 @@ function OrdersPage() {
       const nextOptions = [...currentOptions, trimmedPackageNumber];
       window.localStorage.setItem(
         PACKAGE_OPTIONS_STORAGE_KEY,
-        JSON.stringify(nextOptions),
+        JSON.stringify(nextOptions)
       );
 
       return nextOptions;
@@ -231,7 +235,9 @@ function OrdersPage() {
     setIsFilterPopoverOpen(false);
   };
   const handleDeleteOrder = (orderId: string) => {
-    setOrders((currentOrders) => currentOrders.filter((order) => order.id !== orderId));
+    setOrders((currentOrders) =>
+      currentOrders.filter((order) => order.id !== orderId)
+    );
   };
   const openDeleteDialog = (orderId: string) => {
     setOrderToDeleteId(orderId);
@@ -250,9 +256,7 @@ function OrdersPage() {
       return;
     }
 
-    const nextId = String(
-      Math.max(0, ...orders.map((order) => Number.parseInt(order.id, 10) || 0)) + 1,
-    );
+    const nextId = crypto.randomUUID();
 
     const costNumber = Number.parseFloat(newOrder.cost);
     const priceNumber = Number.parseFloat(newOrder.price);
@@ -284,13 +288,18 @@ function OrdersPage() {
   };
 
   const filteredOrders = orders.filter((order) => {
-    const matchedItem = order.item.toLowerCase().includes(searchItem.toLowerCase());
+    const matchedItem = order.item
+      .toLowerCase()
+      .includes(searchItem.toLowerCase());
     const matchedPaymentStatus =
-      filterPaymentStatus === "全部" || order.paymentStatus === filterPaymentStatus;
+      filterPaymentStatus === "全部" ||
+      order.paymentStatus === filterPaymentStatus;
     const matchedProductStatus =
-      filterProductStatus === "全部" || order.productStatus === filterProductStatus;
+      filterProductStatus === "全部" ||
+      order.productStatus === filterProductStatus;
     const matchedPackageNumber =
-      filterPackageNumber === "全部" || order.packageNumber === filterPackageNumber;
+      filterPackageNumber === "全部" ||
+      order.packageNumber === filterPackageNumber;
 
     return (
       matchedItem &&
@@ -312,10 +321,16 @@ function OrdersPage() {
     const cost = Number.parseFloat(order.cost);
     return Number.isNaN(cost) ? sum : sum + cost;
   }, 0);
-  const totalPages = Math.max(1, Math.ceil(sortedFilteredOrders.length / pageSize));
+  const totalPages = Math.max(
+    1,
+    Math.ceil(sortedFilteredOrders.length / pageSize)
+  );
   const safeCurrentPage = Math.min(currentPage, totalPages);
   const startIndex = (safeCurrentPage - 1) * pageSize;
-  const paginatedOrders = sortedFilteredOrders.slice(startIndex, startIndex + pageSize);
+  const paginatedOrders = sortedFilteredOrders.slice(
+    startIndex,
+    startIndex + pageSize
+  );
   const paginatedOrderIds = paginatedOrders.map((order) => order.id);
   const isAllCurrentPageSelected =
     paginatedOrderIds.length > 0 &&
@@ -349,8 +364,8 @@ function OrdersPage() {
       currentOrders.map((order) =>
         selectedOrderIds.includes(order.id)
           ? { ...order, packageNumber: bulkPackageNumber }
-          : order,
-      ),
+          : order
+      )
     );
     setSelectedOrderIds([]);
     setIsMoveToPopoverOpen(false);
@@ -358,10 +373,36 @@ function OrdersPage() {
 
   return (
     <main style={{ padding: "2rem", fontFamily: "system-ui, sans-serif" }}>
+      {ordersLoading && (
+        <p className="mb-4 text-sm text-muted-foreground" role="status">
+          載入訂單中…
+        </p>
+      )}
+      {ordersError && (
+        <div
+          className="mb-4 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          role="alert"
+        >
+          <p className="font-medium">無法載入訂單</p>
+          <p className="mt-1 text-destructive/90">{ordersError}</p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-2"
+            onClick={() => void loadOrders()}
+          >
+            重試
+          </Button>
+        </div>
+      )}
       <div className="mb-4 flex items-center justify-between gap-2">
         <p>訂單管理</p>
         <div className="flex items-center gap-2">
-          <Dialog open={isCreateOrderDialogOpen} onOpenChange={setIsCreateOrderDialogOpen}>
+          <Dialog
+            open={isCreateOrderDialogOpen}
+            onOpenChange={setIsCreateOrderDialogOpen}
+          >
             <DialogTrigger render={<Button type="button">建立新訂單</Button>} />
             <DialogContent className="max-w-xl">
               <DialogHeader>
@@ -370,21 +411,30 @@ function OrdersPage() {
               </DialogHeader>
               <div className="grid gap-3 py-2 md:grid-cols-2">
                 <div className="space-y-1">
-                  <label htmlFor="new-order-item" className="text-sm font-medium">
+                  <label
+                    htmlFor="new-order-item"
+                    className="text-sm font-medium"
+                  >
                     品項
                   </label>
                   <Input
                     id="new-order-item"
                     value={newOrder.item}
                     onChange={(event) =>
-                      setNewOrder((current) => ({ ...current, item: event.target.value }))
+                      setNewOrder((current) => ({
+                        ...current,
+                        item: event.target.value,
+                      }))
                     }
                     placeholder="品項"
                     aria-label="品項"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label htmlFor="new-order-purchase-date" className="text-sm font-medium">
+                  <label
+                    htmlFor="new-order-purchase-date"
+                    className="text-sm font-medium"
+                  >
                     購買日期
                   </label>
                   <Input
@@ -401,14 +451,20 @@ function OrdersPage() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <label htmlFor="new-order-buyer" className="text-sm font-medium">
+                  <label
+                    htmlFor="new-order-buyer"
+                    className="text-sm font-medium"
+                  >
                     購買人
                   </label>
                   <Input
                     id="new-order-buyer"
                     value={newOrder.buyer}
                     onChange={(event) =>
-                      setNewOrder((current) => ({ ...current, buyer: event.target.value }))
+                      setNewOrder((current) => ({
+                        ...current,
+                        buyer: event.target.value,
+                      }))
                     }
                     placeholder="購買人"
                     aria-label="購買人"
@@ -420,7 +476,10 @@ function OrdersPage() {
                     value={newOrder.payer}
                     onValueChange={(value) => {
                       if (value === "虹" || value === "藍") {
-                        setNewOrder((current) => ({ ...current, payer: value }));
+                        setNewOrder((current) => ({
+                          ...current,
+                          payer: value,
+                        }));
                       }
                     }}
                   >
@@ -434,7 +493,10 @@ function OrdersPage() {
                   </Select>
                 </div>
                 <div className="space-y-1">
-                  <label htmlFor="new-order-cost" className="text-sm font-medium">
+                  <label
+                    htmlFor="new-order-cost"
+                    className="text-sm font-medium"
+                  >
                     成本
                   </label>
                   <Input
@@ -442,14 +504,20 @@ function OrdersPage() {
                     type="number"
                     value={newOrder.cost}
                     onChange={(event) =>
-                      setNewOrder((current) => ({ ...current, cost: event.target.value }))
+                      setNewOrder((current) => ({
+                        ...current,
+                        cost: event.target.value,
+                      }))
                     }
                     placeholder="成本"
                     aria-label="成本"
                   />
                 </div>
                 <div className="space-y-1">
-                  <label htmlFor="new-order-price" className="text-sm font-medium">
+                  <label
+                    htmlFor="new-order-price"
+                    className="text-sm font-medium"
+                  >
                     售價
                   </label>
                   <Input
@@ -457,7 +525,10 @@ function OrdersPage() {
                     type="number"
                     value={newOrder.price}
                     onChange={(event) =>
-                      setNewOrder((current) => ({ ...current, price: event.target.value }))
+                      setNewOrder((current) => ({
+                        ...current,
+                        price: event.target.value,
+                      }))
                     }
                     placeholder="售價"
                     aria-label="售價"
@@ -468,8 +539,15 @@ function OrdersPage() {
                   <Select
                     value={newOrder.paymentStatus}
                     onValueChange={(value) => {
-                      if (value === "未收款" || value === "已收款" || value === "已入帳") {
-                        setNewOrder((current) => ({ ...current, paymentStatus: value }));
+                      if (
+                        value === "未收款" ||
+                        value === "已收款" ||
+                        value === "已入帳"
+                      ) {
+                        setNewOrder((current) => ({
+                          ...current,
+                          paymentStatus: value,
+                        }));
                       }
                     }}
                   >
@@ -496,7 +574,10 @@ function OrdersPage() {
                         value === "到台灣" ||
                         value === "已出貨"
                       ) {
-                        setNewOrder((current) => ({ ...current, productStatus: value }));
+                        setNewOrder((current) => ({
+                          ...current,
+                          productStatus: value,
+                        }));
                       }
                     }}
                   >
@@ -519,7 +600,10 @@ function OrdersPage() {
                     value={newOrder.packageNumber}
                     onValueChange={(value) => {
                       if (value) {
-                        setNewOrder((current) => ({ ...current, packageNumber: value }));
+                        setNewOrder((current) => ({
+                          ...current,
+                          packageNumber: value,
+                        }));
                       }
                     }}
                   >
@@ -527,7 +611,7 @@ function OrdersPage() {
                       <SelectValue placeholder="包裹編號" />
                     </SelectTrigger>
                     <SelectContent>
-                    <SelectItem value="未指定">未指定</SelectItem>
+                      <SelectItem value="未指定">未指定</SelectItem>
                       {packageNumberOptions.map((packageNumber) => (
                         <SelectItem key={packageNumber} value={packageNumber}>
                           {packageNumber}
@@ -554,7 +638,9 @@ function OrdersPage() {
             open={isCreatePackageDialogOpen}
             onOpenChange={setIsCreatePackageDialogOpen}
           >
-            <DialogTrigger render={<Button type="button">建立包裹編號</Button>} />
+            <DialogTrigger
+              render={<Button type="button">建立包裹編號</Button>}
+            />
             <DialogContent>
               <DialogHeader>
                 <DialogTitle>建立包裹編號</DialogTitle>
@@ -587,21 +673,37 @@ function OrdersPage() {
         <Input
           value={searchItem}
           onChange={(event) => setSearchItem(event.target.value)}
-          placeholder="搜尋品項"
-          aria-label="搜尋品項"
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.preventDefault();
+              setAppliedItemSearch(searchItem.trim());
+            }
+          }}
+          placeholder="搜尋品項（按 Enter）"
+          aria-label="搜尋品項，按 Enter 查詢"
           className="max-w-sm"
         />
 
-        <Popover open={isFilterPopoverOpen} onOpenChange={handleFilterPopoverOpenChange}>
+        <Popover
+          open={isFilterPopoverOpen}
+          onOpenChange={handleFilterPopoverOpenChange}
+        >
           <PopoverTrigger
             render={
-              <Button type="button" variant="outline" size="icon" aria-label="篩選">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                aria-label="篩選"
+              >
                 <FilterIcon className="h-4 w-4" />
               </Button>
             }
           />
           <PopoverContent className="w-72 p-3" align="end">
-            <p className="px-1 text-xs font-medium text-muted-foreground">篩選條件</p>
+            <p className="px-1 text-xs font-medium text-muted-foreground">
+              篩選條件
+            </p>
             <div className="my-2 h-px bg-border" />
             <div className="mt-2 space-y-3">
               <div className="space-y-1">
@@ -671,7 +773,10 @@ function OrdersPage() {
         </Popover>
 
         {selectedOrderIds.length > 0 && (
-          <Popover open={isMoveToPopoverOpen} onOpenChange={setIsMoveToPopoverOpen}>
+          <Popover
+            open={isMoveToPopoverOpen}
+            onOpenChange={setIsMoveToPopoverOpen}
+          >
             <PopoverTrigger
               render={
                 <Button
@@ -687,7 +792,10 @@ function OrdersPage() {
             />
             <PopoverContent className="w-64 space-y-3" align="start">
               <p className="text-sm font-medium">指定包裹編號</p>
-              <Select value={bulkPackageNumber} onValueChange={(value) => value && setBulkPackageNumber(value)}>
+              <Select
+                value={bulkPackageNumber}
+                onValueChange={(value) => value && setBulkPackageNumber(value)}
+              >
                 <SelectTrigger aria-label="批次設定包裹編號">
                   <SelectValue placeholder="包裹編號" />
                 </SelectTrigger>
@@ -700,7 +808,11 @@ function OrdersPage() {
                   ))}
                 </SelectContent>
               </Select>
-              <Button type="button" className="w-full" onClick={applyBulkPackageNumber}>
+              <Button
+                type="button"
+                className="w-full"
+                onClick={applyBulkPackageNumber}
+              >
                 套用到已選訂單
               </Button>
             </PopoverContent>
@@ -709,13 +821,16 @@ function OrdersPage() {
       </div>
 
       <div className="mb-4 flex flex-wrap gap-2">
-        {searchItem.trim() && (
+        {appliedItemSearch !== "" && (
           <button
             type="button"
-            onClick={() => setSearchItem("")}
+            onClick={() => {
+              setSearchItem("");
+              setAppliedItemSearch("");
+            }}
             className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-3 py-1 text-xs"
           >
-            品項: {searchItem}
+            品項: {appliedItemSearch}
             <span aria-hidden="true">×</span>
           </button>
         )}
@@ -762,7 +877,9 @@ function OrdersPage() {
                   ref={(input) => {
                     if (input) input.indeterminate = isSomeCurrentPageSelected;
                   }}
-                  onChange={(event) => toggleSelectAllCurrentPage(event.target.checked)}
+                  onChange={(event) =>
+                    toggleSelectAllCurrentPage(event.target.checked)
+                  }
                   aria-label="全選目前頁面訂單"
                 />
               </TableHead>
@@ -773,7 +890,7 @@ function OrdersPage() {
                   type="button"
                   onClick={() =>
                     setDateSortDirection((current) =>
-                      current === "asc" ? "desc" : "asc",
+                      current === "asc" ? "desc" : "asc"
                     )
                   }
                   className="inline-flex items-center gap-1 font-medium"
@@ -803,7 +920,9 @@ function OrdersPage() {
                   <input
                     type="checkbox"
                     checked={selectedOrderIds.includes(order.id)}
-                    onChange={(event) => toggleSelectOrder(order.id, event.target.checked)}
+                    onChange={(event) =>
+                      toggleSelectOrder(order.id, event.target.checked)
+                    }
                     aria-label={`選擇訂單 ${order.id}`}
                   />
                 </TableCell>
@@ -836,7 +955,11 @@ function OrdersPage() {
                   <Select
                     value={order.paymentStatus}
                     onValueChange={(value) => {
-                      if (value === "未收款" || value === "已收款" || value === "已入帳") {
+                      if (
+                        value === "未收款" ||
+                        value === "已收款" ||
+                        value === "已入帳"
+                      ) {
                         updateOrder(order.id, "paymentStatus", value);
                       }
                     }}
@@ -883,7 +1006,9 @@ function OrdersPage() {
                 <TableCell>
                   <Select
                     value={order.packageNumber}
-                    onValueChange={(value) => handlePackageNumberChange(order.id, value)}
+                    onValueChange={(value) =>
+                      handlePackageNumberChange(order.id, value)
+                    }
                   >
                     <SelectTrigger className="h-8 w-32" aria-label="包裹編號">
                       <SelectValue placeholder="包裹編號" />
@@ -925,17 +1050,27 @@ function OrdersPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>確認刪除</DialogTitle>
-            <DialogDescription>確定要刪除這筆訂單嗎？此操作無法復原。</DialogDescription>
+            <DialogDescription>
+              確定要刪除這筆訂單嗎？此操作無法復原。
+            </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <DialogClose
               render={
-                <Button type="button" variant="outline" onClick={() => setOrderToDeleteId(null)}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setOrderToDeleteId(null)}
+                >
                   取消
                 </Button>
               }
             />
-            <Button type="button" variant="destructive" onClick={confirmDeleteOrder}>
+            <Button
+              type="button"
+              variant="destructive"
+              onClick={confirmDeleteOrder}
+            >
               確認刪除
             </Button>
           </DialogFooter>
@@ -950,7 +1085,9 @@ function OrdersPage() {
           </p>
           <p>
             總收益（依目前篩選）:{" "}
-            <span className="font-semibold">{totalProfit.toLocaleString()}</span>
+            <span className="font-semibold">
+              {totalProfit.toLocaleString()}
+            </span>
           </p>
         </div>
 
@@ -971,7 +1108,9 @@ function OrdersPage() {
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => setCurrentPage(Math.min(totalPages, safeCurrentPage + 1))}
+            onClick={() =>
+              setCurrentPage(Math.min(totalPages, safeCurrentPage + 1))
+            }
             disabled={safeCurrentPage === totalPages}
           >
             下一頁
