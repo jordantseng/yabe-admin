@@ -1,4 +1,38 @@
-/** Matches public.orders after running supabase/migrations/20260429120000_create_orders.sql */
+/**
+ * Matches public schema after migrations:
+ * - 20260429120000_create_orders.sql
+ * - 20260515120000_packages_and_order_links.sql
+ * - 20260429154500_drop_orders_revenue.sql
+ * - 20260429160000_add_shipping_fees.sql
+ */
+
+export type PackageStatus =
+  | "open"
+  | "in_japan"
+  | "in_transit"
+  | "arrived_taiwan"
+  | "closed";
+
+export type PackageRow = {
+  id: string;
+  number: number;
+  status: PackageStatus;
+  notes: string | null;
+  international_shipping_fee: number;
+  arrived_at_tw: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type PackageInsert = Omit<
+  PackageRow,
+  "id" | "number" | "created_at" | "updated_at"
+> &
+  Partial<Pick<PackageRow, "id">>;
+
+export type PackageUpdate = Partial<
+  Omit<PackageRow, "id" | "number" | "created_at" | "updated_at">
+>;
 
 export type OrderPayer = "虹" | "藍";
 
@@ -20,17 +54,22 @@ export type OrderRow = {
   payer: OrderPayer;
   cost: number;
   price: number;
-  revenue: number;
+  domestic_shipping_fee: number;
   payment_status: OrderPaymentStatus;
   product_status: OrderProductStatus;
+  /** Legacy; prefer package_id + join packages.number. */
   package_number: string;
+  /** Assigned consolidation parcel; null = not assigned. */
+  package_id: string | null;
+  /** TW store-to-store / local address after arrival (per order). */
+  domestic_delivery_address: string;
   created_at: string;
   updated_at: string;
 };
 
-export type OrderInsert = Omit<OrderRow, "id" | "revenue" | "created_at" | "updated_at"> &
+export type OrderInsert = Omit<OrderRow, "id" | "created_at" | "updated_at"> &
   Partial<Pick<OrderRow, "id">>;
 
 export type OrderUpdate = Partial<
-  Omit<OrderRow, "id" | "revenue" | "created_at" | "updated_at">
+  Omit<OrderRow, "id" | "created_at" | "updated_at">
 >;

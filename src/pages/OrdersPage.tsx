@@ -54,44 +54,22 @@ import {
   ordersListSearchParams,
   type OrdersListUrlState,
 } from "@/lib/orders-list-url";
+import { fetchPackageNumbersFromDb } from "@/lib/packages";
+import { PACKAGE_NUMBER_OPTIONS_CHANGED_EVENT } from "@/lib/package-number-options";
 
-const PACKAGE_OPTIONS_STORAGE_KEY = "package-number-options";
-const ORDERS_PAGE_SIZE = 5;
+const ORDERS_PAGE_SIZE = 15;
+
+type NewOrderDraft = Omit<OrderRow, "id"> & {
+  domesticDeliveryAddress: string;
+};
 
 function OrdersPage() {
-  const [isCreatePackageDialogOpen, setIsCreatePackageDialogOpen] =
-    useState(false);
   const [isCreateOrderDialogOpen, setIsCreateOrderDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [orderToDeleteId, setOrderToDeleteId] = useState<string | null>(null);
-  const [newPackageNumber, setNewPackageNumber] = useState("");
-  const [packageNumberOptions, setPackageNumberOptions] = useState(() => {
-    if (typeof window === "undefined") {
-      return ["PKG-001", "PKG-002", "PKG-003"];
-    }
-
-    const savedOptions = window.localStorage.getItem(
-      PACKAGE_OPTIONS_STORAGE_KEY
-    );
-    if (!savedOptions) {
-      return ["PKG-001", "PKG-002", "PKG-003"];
-    }
-
-    try {
-      const parsed = JSON.parse(savedOptions);
-      if (
-        Array.isArray(parsed) &&
-        parsed.length > 0 &&
-        parsed.every((item) => typeof item === "string")
-      ) {
-        return parsed;
-      }
-    } catch {
-      // Ignore malformed localStorage value and fallback to default.
-    }
-
-    return ["PKG-001", "PKG-002", "PKG-003"];
-  });
+  const [packageNumberOptions, setPackageNumberOptions] = useState<string[]>(
+    []
+  );
   const [listUrl, setListUrl] = useQueryStates(ordersListSearchParams, {
     history: "push",
   });
@@ -117,13 +95,15 @@ function OrdersPage() {
   const [isMoveToPopoverOpen, setIsMoveToPopoverOpen] = useState(false);
   const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
   const [bulkPackageNumber, setBulkPackageNumber] = useState("未指定");
-  const [newOrder, setNewOrder] = useState<Omit<OrderRow, "id">>({
+  const [newOrder, setNewOrder] = useState<NewOrderDraft>({
     item: "",
     purchaseDate: new Date().toISOString().slice(0, 10),
     buyer: "",
+    domesticDeliveryAddress: "",
     payer: "虹",
     cost: "0",
     price: "0",
+    domesticShippingFee: "0",
     revenue: "0",
     paymentStatus: "未收款",
     productStatus: "未購買",
@@ -207,52 +187,22 @@ function OrdersPage() {
   }, [q, payment, product, pkg, sort, page, refreshKey, setListUrl]);
 
   useEffect(() => {
-    const extras = orders
-      .map((o) => o.packageNumber)
-      .filter((p) => p && p !== "未指定");
-    if (extras.length === 0) {
-      return;
-    }
-    startTransition(() => {
-      setPackageNumberOptions((prev) => {
-        const merged = Array.from(new Set([...prev, ...extras]));
-        if (
-          merged.length === prev.length &&
-          merged.every((v, i) => v === prev[i])
-        ) {
-          return prev;
+    const refresh = () => {
+      void (async () => {
+        const res = await fetchPackageNumbersFromDb();
+        if (!res.error && res.data) {
+          startTransition(() => {
+            setPackageNumberOptions(res.data ?? []);
+          });
         }
-        window.localStorage.setItem(
-          PACKAGE_OPTIONS_STORAGE_KEY,
-          JSON.stringify(merged)
-        );
-        return merged;
-      });
-    });
-  }, [orders]);
-
-  const handleCreatePackageNumber = () => {
-    const trimmedPackageNumber = newPackageNumber.trim();
-    if (!trimmedPackageNumber) {
-      return;
-    }
-
-    setPackageNumberOptions((currentOptions) => {
-      if (currentOptions.includes(trimmedPackageNumber)) {
-        return currentOptions;
-      }
-
-      const nextOptions = [...currentOptions, trimmedPackageNumber];
-      window.localStorage.setItem(
-        PACKAGE_OPTIONS_STORAGE_KEY,
-        JSON.stringify(nextOptions)
-      );
-
-      return nextOptions;
-    });
-    setNewPackageNumber("");
-    setIsCreatePackageDialogOpen(false);
-  };
+      })();
+    };
+    refresh();
+    window.addEventListener(PACKAGE_NUMBER_OPTIONS_CHANGED_EVENT, refresh);
+    return () => {
+      window.removeEventListener(PACKAGE_NUMBER_OPTIONS_CHANGED_EVENT, refresh);
+    };
+  }, []);
 
   const persistListPatch = async (
     orderId: string,
@@ -333,6 +283,7 @@ function OrdersPage() {
 
     const costNumber = Number.parseFloat(newOrder.cost);
     const priceNumber = Number.parseFloat(newOrder.price);
+    const domesticShippingFeeNumber = Number.parseFloat(newOrder.domesticShippingFee);
 
     setCreateOrderError(null);
     setIsCreateOrderSubmitting(true);
@@ -340,9 +291,13 @@ function OrdersPage() {
       item,
       purchaseDate: newOrder.purchaseDate,
       buyer,
+      domesticDeliveryAddress: newOrder.domesticDeliveryAddress,
       payer: newOrder.payer,
       cost: Number.isNaN(costNumber) ? 0 : costNumber,
       price: Number.isNaN(priceNumber) ? 0 : priceNumber,
+      domesticShippingFee: Number.isNaN(domesticShippingFeeNumber)
+        ? 0
+        : domesticShippingFeeNumber,
       paymentStatus: newOrder.paymentStatus,
       productStatus: newOrder.productStatus,
       packageNumber: newOrder.packageNumber,
@@ -357,9 +312,11 @@ function OrdersPage() {
       item: "",
       purchaseDate: new Date().toISOString().slice(0, 10),
       buyer: "",
+      domesticDeliveryAddress: "",
       payer: "虹",
       cost: "0",
       price: "0",
+      domesticShippingFee: "0",
       revenue: "0",
       paymentStatus: "未收款",
       productStatus: "未購買",
@@ -410,7 +367,9 @@ function OrdersPage() {
     }
     setListFieldError(null);
     const results = await Promise.all(
-      ids.map((id) => updateOrderFields(id, { packageNumber: bulkPackageNumber }))
+      ids.map((id) =>
+        updateOrderFields(id, { packageNumber: bulkPackageNumber })
+      )
     );
     const failed = results.find((r) => r.error);
     if (failed?.error) {
@@ -452,7 +411,7 @@ function OrdersPage() {
         </div>
       )}
       <div className="mb-4 flex items-center justify-between gap-2">
-        <p>訂單管理</p>
+        <h1 className="text-xl font-semibold">訂單管理</h1>
         <div className="flex items-center gap-2">
           <Dialog
             open={isCreateOrderDialogOpen}
@@ -474,217 +433,281 @@ function OrdersPage() {
                   {createOrderError}
                 </p>
               )}
-              <div className="grid gap-3 py-2 md:grid-cols-2">
-                <div className="space-y-1">
-                  <label
-                    htmlFor="new-order-item"
-                    className="text-sm font-medium"
-                  >
-                    品項
-                  </label>
-                  <Input
-                    id="new-order-item"
-                    value={newOrder.item}
-                    onChange={(event) =>
-                      setNewOrder((current) => ({
-                        ...current,
-                        item: event.target.value,
-                      }))
-                    }
-                    placeholder="品項"
-                    aria-label="品項"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label
-                    htmlFor="new-order-purchase-date"
-                    className="text-sm font-medium"
-                  >
-                    購買日期
-                  </label>
-                  <Input
-                    id="new-order-purchase-date"
-                    type="date"
-                    value={newOrder.purchaseDate}
-                    onChange={(event) =>
-                      setNewOrder((current) => ({
-                        ...current,
-                        purchaseDate: event.target.value,
-                      }))
-                    }
-                    aria-label="購買日期"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label
-                    htmlFor="new-order-buyer"
-                    className="text-sm font-medium"
-                  >
-                    購買人
-                  </label>
-                  <Input
-                    id="new-order-buyer"
-                    value={newOrder.buyer}
-                    onChange={(event) =>
-                      setNewOrder((current) => ({
-                        ...current,
-                        buyer: event.target.value,
-                      }))
-                    }
-                    placeholder="購買人"
-                    aria-label="購買人"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium">付款人</label>
-                  <Select
-                    value={newOrder.payer}
-                    onValueChange={(value) => {
-                      if (value === "虹" || value === "藍") {
-                        setNewOrder((current) => ({
-                          ...current,
-                          payer: value,
-                        }));
-                      }
-                    }}
-                  >
-                    <SelectTrigger aria-label="付款人">
-                      <SelectValue placeholder="付款人" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="虹">虹</SelectItem>
-                      <SelectItem value="藍">藍</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <label
-                    htmlFor="new-order-cost"
-                    className="text-sm font-medium"
-                  >
-                    成本
-                  </label>
-                  <Input
-                    id="new-order-cost"
-                    type="number"
-                    value={newOrder.cost}
-                    onChange={(event) =>
-                      setNewOrder((current) => ({
-                        ...current,
-                        cost: event.target.value,
-                      }))
-                    }
-                    placeholder="成本"
-                    aria-label="成本"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label
-                    htmlFor="new-order-price"
-                    className="text-sm font-medium"
-                  >
-                    售價
-                  </label>
-                  <Input
-                    id="new-order-price"
-                    type="number"
-                    value={newOrder.price}
-                    onChange={(event) =>
-                      setNewOrder((current) => ({
-                        ...current,
-                        price: event.target.value,
-                      }))
-                    }
-                    placeholder="售價"
-                    aria-label="售價"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium">收款狀態</label>
-                  <Select
-                    value={newOrder.paymentStatus}
-                    onValueChange={(value) => {
-                      if (
-                        value === "未收款" ||
-                        value === "已收款" ||
-                        value === "已入帳"
-                      ) {
-                        setNewOrder((current) => ({
-                          ...current,
-                          paymentStatus: value,
-                        }));
-                      }
-                    }}
-                  >
-                    <SelectTrigger aria-label="收款狀態">
-                      <SelectValue placeholder="收款狀態" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="未收款">未收款</SelectItem>
-                      <SelectItem value="已收款">已收款</SelectItem>
-                      <SelectItem value="已入帳">已入帳</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium">商品狀態</label>
-                  <Select
-                    value={newOrder.productStatus}
-                    onValueChange={(value) => {
-                      if (
-                        value === "未購買" ||
-                        value === "已購賣" ||
-                        value === "到虹家" ||
-                        value === "集運回台" ||
-                        value === "到台灣" ||
-                        value === "已出貨"
-                      ) {
-                        setNewOrder((current) => ({
-                          ...current,
-                          productStatus: value,
-                        }));
-                      }
-                    }}
-                  >
-                    <SelectTrigger aria-label="商品狀態">
-                      <SelectValue placeholder="商品狀態" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="未購買">未購買</SelectItem>
-                      <SelectItem value="已購賣">已購賣</SelectItem>
-                      <SelectItem value="到虹家">到虹家</SelectItem>
-                      <SelectItem value="集運回台">集運回台</SelectItem>
-                      <SelectItem value="到台灣">到台灣</SelectItem>
-                      <SelectItem value="已出貨">已出貨</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium">包裹編號</label>
-                  <Select
-                    value={newOrder.packageNumber}
-                    onValueChange={(value) => {
-                      if (value) {
-                        setNewOrder((current) => ({
-                          ...current,
-                          packageNumber: value,
-                        }));
-                      }
-                    }}
-                  >
-                    <SelectTrigger aria-label="包裹編號">
-                      <SelectValue placeholder="包裹編號" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="未指定">未指定</SelectItem>
-                      {packageNumberOptions.map((packageNumber) => (
-                        <SelectItem key={packageNumber} value={packageNumber}>
-                          {packageNumber}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+              <div className="space-y-4 py-2">
+                <section className="space-y-3 rounded-md border p-3">
+                  <p className="text-xs font-semibold text-muted-foreground">
+                    基本資料
+                  </p>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    <div className="space-y-1">
+                      <label
+                        htmlFor="new-order-item"
+                        className="text-sm font-medium"
+                      >
+                        品項
+                      </label>
+                      <Input
+                        id="new-order-item"
+                        value={newOrder.item}
+                        onChange={(event) =>
+                          setNewOrder((current) => ({
+                            ...current,
+                            item: event.target.value,
+                          }))
+                        }
+                        placeholder="品項"
+                        aria-label="品項"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label
+                        htmlFor="new-order-purchase-date"
+                        className="text-sm font-medium"
+                      >
+                        購買日期
+                      </label>
+                      <Input
+                        id="new-order-purchase-date"
+                        type="date"
+                        value={newOrder.purchaseDate}
+                        onChange={(event) =>
+                          setNewOrder((current) => ({
+                            ...current,
+                            purchaseDate: event.target.value,
+                          }))
+                        }
+                        aria-label="購買日期"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label
+                        htmlFor="new-order-buyer"
+                        className="text-sm font-medium"
+                      >
+                        購買人
+                      </label>
+                      <Input
+                        id="new-order-buyer"
+                        value={newOrder.buyer}
+                        onChange={(event) =>
+                          setNewOrder((current) => ({
+                            ...current,
+                            buyer: event.target.value,
+                          }))
+                        }
+                        placeholder="購買人"
+                        aria-label="購買人"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">付款人</label>
+                      <Select
+                        value={newOrder.payer}
+                        onValueChange={(value) => {
+                          if (value === "虹" || value === "藍") {
+                            setNewOrder((current) => ({
+                              ...current,
+                              payer: value,
+                            }));
+                          }
+                        }}
+                      >
+                        <SelectTrigger aria-label="付款人">
+                          <SelectValue placeholder="付款人" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="虹">虹</SelectItem>
+                          <SelectItem value="藍">藍</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1 md:col-span-2">
+                      <label
+                        htmlFor="new-order-address"
+                        className="text-sm font-medium"
+                      >
+                        地址
+                      </label>
+                      <Input
+                        id="new-order-address"
+                        value={newOrder.domesticDeliveryAddress}
+                        onChange={(event) =>
+                          setNewOrder((current) => ({
+                            ...current,
+                            domesticDeliveryAddress: event.target.value,
+                          }))
+                        }
+                        placeholder="地址"
+                        aria-label="地址"
+                      />
+                    </div>
+                  </div>
+                </section>
+
+                <section className="space-y-3 rounded-md border p-3">
+                  <p className="text-xs font-semibold text-muted-foreground">
+                    金額資訊
+                  </p>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <div className="space-y-1">
+                      <label
+                        htmlFor="new-order-cost"
+                        className="text-sm font-medium"
+                      >
+                        成本
+                      </label>
+                      <Input
+                        id="new-order-cost"
+                        type="number"
+                        value={newOrder.cost}
+                        onChange={(event) =>
+                          setNewOrder((current) => ({
+                            ...current,
+                            cost: event.target.value,
+                          }))
+                        }
+                        placeholder="成本"
+                        aria-label="成本"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label
+                        htmlFor="new-order-price"
+                        className="text-sm font-medium"
+                      >
+                        售價
+                      </label>
+                      <Input
+                        id="new-order-price"
+                        type="number"
+                        value={newOrder.price}
+                        onChange={(event) =>
+                          setNewOrder((current) => ({
+                            ...current,
+                            price: event.target.value,
+                          }))
+                        }
+                        placeholder="售價"
+                        aria-label="售價"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label
+                        htmlFor="new-order-domestic-shipping-fee"
+                        className="text-sm font-medium"
+                      >
+                        店到店運費
+                      </label>
+                      <Input
+                        id="new-order-domestic-shipping-fee"
+                        type="number"
+                        value={newOrder.domesticShippingFee}
+                        onChange={(event) =>
+                          setNewOrder((current) => ({
+                            ...current,
+                            domesticShippingFee: event.target.value,
+                          }))
+                        }
+                        placeholder="店到店運費"
+                        aria-label="店到店運費"
+                      />
+                    </div>
+                  </div>
+                </section>
+
+                <section className="space-y-3 rounded-md border p-3">
+                  <p className="text-xs font-semibold text-muted-foreground">
+                    訂單狀態
+                  </p>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">收款狀態</label>
+                      <Select
+                        value={newOrder.paymentStatus}
+                        onValueChange={(value) => {
+                          if (
+                            value === "未收款" ||
+                            value === "已收款" ||
+                            value === "已入帳"
+                          ) {
+                            setNewOrder((current) => ({
+                              ...current,
+                              paymentStatus: value,
+                            }));
+                          }
+                        }}
+                      >
+                        <SelectTrigger aria-label="收款狀態">
+                          <SelectValue placeholder="收款狀態" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="未收款">未收款</SelectItem>
+                          <SelectItem value="已收款">已收款</SelectItem>
+                          <SelectItem value="已入帳">已入帳</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">商品狀態</label>
+                      <Select
+                        value={newOrder.productStatus}
+                        onValueChange={(value) => {
+                          if (
+                            value === "未購買" ||
+                            value === "已購賣" ||
+                            value === "到虹家" ||
+                            value === "集運回台" ||
+                            value === "到台灣" ||
+                            value === "已出貨"
+                          ) {
+                            setNewOrder((current) => ({
+                              ...current,
+                              productStatus: value,
+                            }));
+                          }
+                        }}
+                      >
+                        <SelectTrigger aria-label="商品狀態">
+                          <SelectValue placeholder="商品狀態" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="未購買">未購買</SelectItem>
+                          <SelectItem value="已購賣">已購賣</SelectItem>
+                          <SelectItem value="到虹家">到虹家</SelectItem>
+                          <SelectItem value="集運回台">集運回台</SelectItem>
+                          <SelectItem value="到台灣">到台灣</SelectItem>
+                          <SelectItem value="已出貨">已出貨</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-sm font-medium">包裹編號</label>
+                      <Select
+                        value={newOrder.packageNumber}
+                        onValueChange={(value) => {
+                          if (value) {
+                            setNewOrder((current) => ({
+                              ...current,
+                              packageNumber: value,
+                            }));
+                          }
+                        }}
+                      >
+                        <SelectTrigger aria-label="包裹編號">
+                          <SelectValue placeholder="包裹編號" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="未指定">未指定</SelectItem>
+                          {packageNumberOptions.map((packageNumber) => (
+                            <SelectItem key={packageNumber} value={packageNumber}>
+                              {packageNumber}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </section>
               </div>
               <DialogFooter>
                 <DialogClose render={<Button variant="outline">取消</Button>} />
@@ -698,39 +721,6 @@ function OrdersPage() {
                   }
                 >
                   {isCreateOrderSubmitting ? "建立中…" : "建立訂單"}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-
-          <Dialog
-            open={isCreatePackageDialogOpen}
-            onOpenChange={setIsCreatePackageDialogOpen}
-          >
-            <DialogTrigger
-              render={<Button type="button">建立包裹編號</Button>}
-            />
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>建立包裹編號</DialogTitle>
-                <DialogDescription>請輸入新的包裹編號。</DialogDescription>
-              </DialogHeader>
-              <div className="py-2">
-                <Input
-                  value={newPackageNumber}
-                  onChange={(event) => setNewPackageNumber(event.target.value)}
-                  placeholder="例如：PKG-002"
-                  aria-label="新的包裹編號"
-                />
-              </div>
-              <DialogFooter>
-                <DialogClose render={<Button variant="outline">取消</Button>} />
-                <Button
-                  type="button"
-                  onClick={handleCreatePackageNumber}
-                  disabled={!newPackageNumber.trim()}
-                >
-                  建立
                 </Button>
               </DialogFooter>
             </DialogContent>
@@ -965,7 +955,7 @@ function OrdersPage() {
                   disabled={ordersLoading}
                 />
               </TableHead>
-              <TableHead>訂單編號</TableHead>
+              <TableHead className="w-[96px] max-w-[96px]">訂單編號</TableHead>
               <TableHead>品項</TableHead>
               <TableHead>
                 <button
@@ -990,6 +980,7 @@ function OrdersPage() {
               <TableHead>付款人</TableHead>
               <TableHead>成本</TableHead>
               <TableHead>售價</TableHead>
+              <TableHead>店到店運費</TableHead>
               <TableHead>收益</TableHead>
               <TableHead>收款狀態</TableHead>
               <TableHead>商品狀態</TableHead>
@@ -1004,8 +995,8 @@ function OrdersPage() {
                   <TableCell>
                     <Skeleton className="h-4 w-4 rounded-sm" />
                   </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-4 w-28" />
+                  <TableCell className="w-[96px] max-w-[96px]">
+                    <Skeleton className="h-4 w-20" />
                   </TableCell>
                   <TableCell>
                     <Skeleton className="h-4 w-44" />
@@ -1018,6 +1009,9 @@ function OrdersPage() {
                   </TableCell>
                   <TableCell>
                     <Skeleton className="h-8 w-24" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-14" />
                   </TableCell>
                   <TableCell>
                     <Skeleton className="h-4 w-14" />
@@ -1047,137 +1041,142 @@ function OrdersPage() {
               ))}
             {!ordersLoading &&
               paginatedOrders.map((order) => (
-              <TableRow key={order.id}>
-                <TableCell>
-                  <input
-                    type="checkbox"
-                    checked={selectedOrderIds.includes(order.id)}
-                    onChange={(event) =>
-                      toggleSelectOrder(order.id, event.target.checked)
-                    }
-                    aria-label={`選擇訂單 ${order.id}`}
-                  />
-                </TableCell>
-                <TableCell>{order.id}</TableCell>
-                <TableCell>{order.item}</TableCell>
-                <TableCell>{order.purchaseDate}</TableCell>
-                <TableCell>{order.buyer}</TableCell>
-                <TableCell>
-                  <Select
-                    value={order.payer}
-                    onValueChange={(value) => {
-                      if (value === "虹" || value === "藍") {
-                        void persistListPatch(order.id, { payer: value });
+                <TableRow key={order.id}>
+                  <TableCell>
+                    <input
+                      type="checkbox"
+                      checked={selectedOrderIds.includes(order.id)}
+                      onChange={(event) =>
+                        toggleSelectOrder(order.id, event.target.checked)
                       }
-                    }}
-                  >
-                    <SelectTrigger className="h-8 w-24" aria-label="付款人">
-                      <SelectValue placeholder="付款人" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="虹">虹</SelectItem>
-                      <SelectItem value="藍">藍</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </TableCell>
-                <TableCell>{order.cost}</TableCell>
-                <TableCell>{order.price}</TableCell>
-                <TableCell>{order.revenue}</TableCell>
-                <TableCell>
-                  <Select
-                    value={order.paymentStatus}
-                    onValueChange={(value) => {
-                      if (
-                        value === "未收款" ||
-                        value === "已收款" ||
-                        value === "已入帳"
-                      ) {
-                        void persistListPatch(order.id, {
-                          paymentStatus: value,
-                        });
+                      aria-label={`選擇訂單 ${order.id}`}
+                    />
+                  </TableCell>
+                  <TableCell className="w-[96px] max-w-[96px]">
+                    <div className="w-[96px] truncate" title={order.id}>
+                      {order.id}
+                    </div>
+                  </TableCell>
+                  <TableCell>{order.item}</TableCell>
+                  <TableCell>{order.purchaseDate}</TableCell>
+                  <TableCell>{order.buyer}</TableCell>
+                  <TableCell>
+                    <Select
+                      value={order.payer}
+                      onValueChange={(value) => {
+                        if (value === "虹" || value === "藍") {
+                          void persistListPatch(order.id, { payer: value });
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="h-8 w-24" aria-label="付款人">
+                        <SelectValue placeholder="付款人" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="虹">虹</SelectItem>
+                        <SelectItem value="藍">藍</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                  <TableCell>{order.cost}</TableCell>
+                  <TableCell>{order.price}</TableCell>
+                  <TableCell>{order.domesticShippingFee}</TableCell>
+                  <TableCell>{order.revenue}</TableCell>
+                  <TableCell>
+                    <Select
+                      value={order.paymentStatus}
+                      onValueChange={(value) => {
+                        if (
+                          value === "未收款" ||
+                          value === "已收款" ||
+                          value === "已入帳"
+                        ) {
+                          void persistListPatch(order.id, {
+                            paymentStatus: value,
+                          });
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="h-8 w-28" aria-label="收款狀態">
+                        <SelectValue placeholder="收款狀態" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="未收款">未收款</SelectItem>
+                        <SelectItem value="已收款">已收款</SelectItem>
+                        <SelectItem value="已入帳">已入帳</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                  <TableCell>
+                    <Select
+                      value={order.productStatus}
+                      onValueChange={(value) => {
+                        if (
+                          value === "未購買" ||
+                          value === "已購賣" ||
+                          value === "到虹家" ||
+                          value === "集運回台" ||
+                          value === "到台灣" ||
+                          value === "已出貨"
+                        ) {
+                          void persistListPatch(order.id, {
+                            productStatus: value,
+                          });
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="h-8 w-32" aria-label="商品狀態">
+                        <SelectValue placeholder="商品狀態" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="未購買">未購買</SelectItem>
+                        <SelectItem value="已購賣">已購賣</SelectItem>
+                        <SelectItem value="到虹家">到虹家</SelectItem>
+                        <SelectItem value="集運回台">集運回台</SelectItem>
+                        <SelectItem value="到台灣">到台灣</SelectItem>
+                        <SelectItem value="已出貨">已出貨</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                  <TableCell>
+                    <Select
+                      value={order.packageNumber}
+                      onValueChange={(value) =>
+                        handlePackageNumberChange(order.id, value)
                       }
-                    }}
-                  >
-                    <SelectTrigger className="h-8 w-28" aria-label="收款狀態">
-                      <SelectValue placeholder="收款狀態" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="未收款">未收款</SelectItem>
-                      <SelectItem value="已收款">已收款</SelectItem>
-                      <SelectItem value="已入帳">已入帳</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </TableCell>
-                <TableCell>
-                  <Select
-                    value={order.productStatus}
-                    onValueChange={(value) => {
-                      if (
-                        value === "未購買" ||
-                        value === "已購賣" ||
-                        value === "到虹家" ||
-                        value === "集運回台" ||
-                        value === "到台灣" ||
-                        value === "已出貨"
-                      ) {
-                        void persistListPatch(order.id, {
-                          productStatus: value,
-                        });
-                      }
-                    }}
-                  >
-                    <SelectTrigger className="h-8 w-32" aria-label="商品狀態">
-                      <SelectValue placeholder="商品狀態" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="未購買">未購買</SelectItem>
-                      <SelectItem value="已購賣">已購賣</SelectItem>
-                      <SelectItem value="到虹家">到虹家</SelectItem>
-                      <SelectItem value="集運回台">集運回台</SelectItem>
-                      <SelectItem value="到台灣">到台灣</SelectItem>
-                      <SelectItem value="已出貨">已出貨</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </TableCell>
-                <TableCell>
-                  <Select
-                    value={order.packageNumber}
-                    onValueChange={(value) =>
-                      handlePackageNumberChange(order.id, value)
-                    }
-                  >
-                    <SelectTrigger className="h-8 w-32" aria-label="包裹編號">
-                      <SelectValue placeholder="包裹編號" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="未指定">未指定</SelectItem>
-                      {packageNumberOptions.map((packageNumber) => (
-                        <SelectItem key={packageNumber} value={packageNumber}>
-                          {packageNumber}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </TableCell>
-                <TableCell className="space-x-2">
-                  <Link
-                    to={`/orders/${order.id}`}
-                    aria-label="查看訂單詳細"
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-input hover:bg-muted"
-                  >
-                    <EyeIcon className="h-4 w-4" />
-                  </Link>
-                  <button
-                    type="button"
-                    aria-label="刪除訂單"
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-input text-destructive hover:bg-destructive/10"
-                    onClick={() => openDeleteDialog(order.id)}
-                  >
-                    <Trash2Icon className="h-4 w-4" />
-                  </button>
-                </TableCell>
-              </TableRow>
-            ))}
+                    >
+                      <SelectTrigger className="h-8 w-32" aria-label="包裹編號">
+                        <SelectValue placeholder="包裹編號" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="未指定">未指定</SelectItem>
+                        {packageNumberOptions.map((packageNumber) => (
+                          <SelectItem key={packageNumber} value={packageNumber}>
+                            {packageNumber}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </TableCell>
+                  <TableCell className="space-x-2">
+                    <Link
+                      to={`/orders/${order.id}`}
+                      aria-label="查看訂單詳細"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-input hover:bg-muted"
+                    >
+                      <EyeIcon className="h-4 w-4" />
+                    </Link>
+                    <button
+                      type="button"
+                      aria-label="刪除訂單"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-input text-destructive hover:bg-destructive/10"
+                      onClick={() => openDeleteDialog(order.id)}
+                    >
+                      <Trash2Icon className="h-4 w-4" />
+                    </button>
+                  </TableCell>
+                </TableRow>
+              ))}
           </TableBody>
         </Table>
       </div>
@@ -1234,11 +1233,15 @@ function OrdersPage() {
           {ordersLoading ? (
             <>
               <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">總成本（依目前篩選）:</span>
+                <span className="text-muted-foreground">
+                  總成本（依目前篩選）:
+                </span>
                 <Skeleton className="h-5 w-24" />
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">總收益（依目前篩選）:</span>
+                <span className="text-muted-foreground">
+                  總收益（依目前篩選）:
+                </span>
                 <Skeleton className="h-5 w-24" />
               </div>
             </>

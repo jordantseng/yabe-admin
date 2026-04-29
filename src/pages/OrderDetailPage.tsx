@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Controller, useForm } from "react-hook-form";
-import { useParams } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
   fetchOrderById,
@@ -15,17 +15,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
-const PACKAGE_OPTIONS_STORAGE_KEY = "package-number-options";
+import { fetchPackageNumbersFromDb } from "@/lib/packages";
+import { PACKAGE_NUMBER_OPTIONS_CHANGED_EVENT } from "@/lib/package-number-options";
 
 function emptyOrderDetailForm(): OrderDetailFormValues {
   return {
     item: "",
     purchaseDate: new Date().toISOString().slice(0, 10),
     buyer: "",
+    domesticDeliveryAddress: "",
     payer: "虹",
     cost: 0,
     price: 0,
+    domesticShippingFee: 0,
     revenue: 0,
     paymentStatus: "未收款",
     productStatus: "未購買",
@@ -35,31 +37,10 @@ function emptyOrderDetailForm(): OrderDetailFormValues {
 
 function OrderDetailPage() {
   const { orderId } = useParams();
-  const [packageNumberOptions, setPackageNumberOptions] = useState(() => {
-    if (typeof window === "undefined") {
-      return ["PKG-001"];
-    }
-
-    const savedOptions = window.localStorage.getItem(PACKAGE_OPTIONS_STORAGE_KEY);
-    if (!savedOptions) {
-      return ["PKG-001"];
-    }
-
-    try {
-      const parsed = JSON.parse(savedOptions);
-      if (
-        Array.isArray(parsed) &&
-        parsed.length > 0 &&
-        parsed.every((item) => typeof item === "string")
-      ) {
-        return parsed;
-      }
-    } catch {
-      // Ignore malformed localStorage value and fallback to default.
-    }
-
-    return ["PKG-001"];
-  });
+  const navigate = useNavigate();
+  const [packageNumberOptions, setPackageNumberOptions] = useState<string[]>(
+    [],
+  );
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -79,14 +60,41 @@ function OrderDetailPage() {
 
   const watchedCost = watch("cost");
   const watchedPrice = watch("price");
+  const watchedDomesticShippingFee = watch("domesticShippingFee");
   const watchedRevenue = watch("revenue");
 
   useEffect(() => {
-    const nextRevenue = (watchedPrice ?? 0) - (watchedCost ?? 0);
+    const nextRevenue =
+      (watchedPrice ?? 0) - (watchedCost ?? 0) - (watchedDomesticShippingFee ?? 0);
     if (nextRevenue !== watchedRevenue) {
       setValue("revenue", nextRevenue, { shouldDirty: true });
     }
-  }, [watchedCost, watchedPrice, watchedRevenue, setValue]);
+  }, [
+    watchedCost,
+    watchedPrice,
+    watchedDomesticShippingFee,
+    watchedRevenue,
+    setValue,
+  ]);
+
+  useEffect(() => {
+    const refresh = () => {
+      void (async () => {
+        const res = await fetchPackageNumbersFromDb();
+        if (!res.error && res.data) {
+          setPackageNumberOptions(res.data ?? []);
+        }
+      })();
+    };
+    refresh();
+    window.addEventListener(PACKAGE_NUMBER_OPTIONS_CHANGED_EVENT, refresh);
+    return () => {
+      window.removeEventListener(
+        PACKAGE_NUMBER_OPTIONS_CHANGED_EVENT,
+        refresh,
+      );
+    };
+  }, []);
 
   useEffect(() => {
     if (!orderId) {
@@ -116,17 +124,6 @@ function OrderDetailPage() {
         return;
       }
       const values = orderRecordToDetailForm(data);
-      const pkg = values.packageNumber;
-      if (pkg && pkg !== "未指定") {
-        setPackageNumberOptions((prev) => {
-          if (prev.includes(pkg)) {
-            return prev;
-          }
-          const next = [...prev, pkg];
-          window.localStorage.setItem(PACKAGE_OPTIONS_STORAGE_KEY, JSON.stringify(next));
-          return next;
-        });
-      }
       reset(values);
     })();
 
@@ -149,17 +146,32 @@ function OrderDetailPage() {
     }
     if (data) {
       reset(orderRecordToDetailForm(data));
+      if (window.history.length > 1) {
+        navigate(-1);
+      } else {
+        navigate("/orders");
+      }
     }
   };
 
   const formDisabled = isLoading || !!loadError;
 
   return (
-    <main style={{ padding: "2rem", fontFamily: "system-ui, sans-serif" }}>
-      <h1 className="mb-2 text-xl font-semibold">訂單詳細</h1>
-      <p className="mb-4 text-sm text-muted-foreground">
-        訂單編號：{orderId ?? "N/A"}
-      </p>
+    <main
+      className="mx-auto max-w-4xl space-y-4"
+      style={{ padding: "2rem", fontFamily: "system-ui, sans-serif" }}
+    >
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-xl font-semibold">訂單詳細</h1>
+          <p className="text-sm text-muted-foreground">
+            訂單編號：{orderId ?? "N/A"}
+          </p>
+        </div>
+        <Button type="button" variant="outline" onClick={() => navigate(-1)}>
+          返回
+        </Button>
+      </div>
       {isLoading && (
         <p className="mb-4 text-sm text-muted-foreground" role="status">
           載入中…
@@ -176,9 +188,12 @@ function OrderDetailPage() {
         </p>
       )}
 
-      <form onSubmit={handleSubmit(onSubmit)} className="mb-6 space-y-4">
+      <form onSubmit={handleSubmit(onSubmit)} className="mb-6 space-y-6">
         <fieldset disabled={formDisabled || isSaving} className="contents">
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="grid gap-4 rounded-md border p-4 md:grid-cols-2">
+          <div className="md:col-span-2">
+            <p className="text-xs font-semibold text-muted-foreground">基本資料</p>
+          </div>
           <Field label="品項">
             <input
               {...register("item", { required: true })}
@@ -197,6 +212,13 @@ function OrderDetailPage() {
           <Field label="購買人">
             <input
               {...register("buyer", { required: true })}
+              className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
+            />
+          </Field>
+
+          <Field label="地址">
+            <input
+              {...register("domesticDeliveryAddress")}
               className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
             />
           </Field>
@@ -225,30 +247,51 @@ function OrderDetailPage() {
             />
           </Field>
 
-          <Field label="成本">
-            <input
-              type="number"
-              {...register("cost", { valueAsNumber: true, required: true })}
-              className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
-            />
-          </Field>
+          <div className="md:col-span-2 mt-2">
+            <p className="text-xs font-semibold text-muted-foreground">金額資訊</p>
+          </div>
 
-          <Field label="售價">
-            <input
-              type="number"
-              {...register("price", { valueAsNumber: true, required: true })}
-              className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
-            />
-          </Field>
+          <div className="md:col-span-2 grid gap-4 md:grid-cols-4">
+            <Field label="成本">
+              <input
+                type="number"
+                {...register("cost", { valueAsNumber: true, required: true })}
+                className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
+              />
+            </Field>
 
-          <Field label="收益">
-            <input
-              type="number"
-              {...register("revenue", { valueAsNumber: true, required: true })}
-              readOnly
-              className="w-full rounded-md border border-input bg-muted px-3 py-2 text-sm"
-            />
-          </Field>
+            <Field label="售價">
+              <input
+                type="number"
+                {...register("price", { valueAsNumber: true, required: true })}
+                className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
+              />
+            </Field>
+
+            <Field label="店到店運費">
+              <input
+                type="number"
+                {...register("domesticShippingFee", {
+                  valueAsNumber: true,
+                  required: true,
+                })}
+                className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
+              />
+            </Field>
+
+            <Field label="收益">
+              <input
+                type="number"
+                {...register("revenue", { valueAsNumber: true, required: true })}
+                readOnly
+                className="w-full rounded-md border border-input bg-muted px-3 py-2 text-sm"
+              />
+            </Field>
+          </div>
+
+          <div className="md:col-span-2 mt-2">
+            <p className="text-xs font-semibold text-muted-foreground">訂單狀態</p>
+          </div>
 
           <Field label="收款狀態">
             <Controller
@@ -330,12 +373,11 @@ function OrderDetailPage() {
               )}
             />
           </Field>
-        </div>
-
-        <div className="flex justify-end">
-          <Button type="submit" disabled={!isDirty || formDisabled || isSaving}>
-            {isSaving ? "更新中…" : "更新"}
-          </Button>
+          <div className="md:col-span-2 mt-2 flex justify-end border-t pt-4">
+            <Button type="submit" disabled={!isDirty || formDisabled || isSaving}>
+              {isSaving ? "更新中…" : "更新"}
+            </Button>
+          </div>
         </div>
         </fieldset>
       </form>

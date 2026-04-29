@@ -5,6 +5,7 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import LoginPage from "@/pages/LoginPage";
 import OrderDetailPage from "@/pages/OrderDetailPage";
 import OrdersPage from "@/pages/OrdersPage";
+import PackagePage from "@/pages/PackagePage";
 
 function App() {
   return (
@@ -18,6 +19,7 @@ function App() {
           <Route path="/" element={<Navigate to="/orders" replace />} />
           <Route path="/orders" element={<OrdersPage />} />
           <Route path="/orders/:orderId" element={<OrderDetailPage />} />
+          <Route path="/packages" element={<PackagePage />} />
           <Route path="*" element={<Navigate to="/orders" replace />} />
         </Route>
       </Route>

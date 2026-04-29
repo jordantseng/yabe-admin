@@ -35,6 +35,16 @@ export function AppLayout() {
                     訂單
                   </NavLink>
                 </NavigationMenuItem>
+                <NavigationMenuItem>
+                  <NavLink
+                    to="/packages"
+                    className={({ isActive }) =>
+                      cn(navigationMenuTriggerStyle(), isActive && "bg-muted")
+                    }
+                  >
+                    包裹
+                  </NavLink>
+                </NavigationMenuItem>
               </NavigationMenuList>
             </NavigationMenu>
           </div>

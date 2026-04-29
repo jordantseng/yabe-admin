@@ -1,6 +1,11 @@
 import { supabase } from "@/lib/supabase";
 import type { OrderRow as OrderRecord } from "@/types/database";
 
+/** Order row from `select('*, packages(number)')`. */
+export type OrderWithPackageNumber = OrderRecord & {
+  packages: { number: number; international_shipping_fee?: number } | null;
+};
+
 export type OrdersTableRow = {
   id: string;
   item: string;
@@ -9,6 +14,7 @@ export type OrdersTableRow = {
   payer: OrderRecord["payer"];
   cost: string;
   price: string;
+  domesticShippingFee: string;
   revenue: string;
   paymentStatus: OrderRecord["payment_status"];
   productStatus: OrderRecord["product_status"];
@@ -19,9 +25,11 @@ export type OrderDetailFormValues = {
   item: string;
   purchaseDate: string;
   buyer: string;
+  domesticDeliveryAddress: string;
   payer: string;
   cost: number;
   price: number;
+  domesticShippingFee: number;
   revenue: number;
   paymentStatus: string;
   productStatus: string;
@@ -60,6 +68,7 @@ export function orderRecordToTableRow(row: OrderRecord): OrdersTableRow {
     payer: row.payer,
     cost: String(row.cost),
     price: String(row.price),
+    domesticShippingFee: String(row.domestic_shipping_fee),
     revenue: revenueStringFromCostPrice(row.cost, row.price),
     paymentStatus: row.payment_status,
     productStatus: row.product_status,
@@ -72,9 +81,11 @@ export function orderRecordToDetailForm(row: OrderRecord): OrderDetailFormValues
     item: row.item,
     purchaseDate: purchaseDateFromRecord(row.purchase_date),
     buyer: row.buyer,
+    domesticDeliveryAddress: row.domestic_delivery_address ?? "",
     payer: row.payer,
     cost: Number(row.cost),
     price: Number(row.price),
+    domesticShippingFee: Number(row.domestic_shipping_fee),
     revenue: revenueFromCostPrice(row.cost, row.price),
     paymentStatus: row.payment_status,
     productStatus: row.product_status,
@@ -143,9 +154,11 @@ export type CreateOrderInput = {
   item: string;
   purchaseDate: string;
   buyer: string;
+  domesticDeliveryAddress: string;
   payer: OrderRecord["payer"];
   cost: number;
   price: number;
+  domesticShippingFee: number;
   paymentStatus: OrderRecord["payment_status"];
   productStatus: OrderRecord["product_status"];
   packageNumber: string;
@@ -165,9 +178,13 @@ export async function createOrder(input: CreateOrderInput): Promise<{
       item: input.item.trim(),
       purchase_date: purchaseDate,
       buyer: input.buyer.trim(),
+      domestic_delivery_address: input.domesticDeliveryAddress.trim(),
       payer: input.payer,
       cost: input.cost,
       price: input.price,
+      domestic_shipping_fee: Number.isFinite(input.domesticShippingFee)
+        ? Math.max(0, input.domesticShippingFee)
+        : 0,
       payment_status: input.paymentStatus,
       product_status: input.productStatus,
       package_number: input.packageNumber,
@@ -210,6 +227,89 @@ export async function fetchOrders(
   };
 }
 
+const PACKAGE_PAGE_LIMIT = 200;
+
+export type FetchOrdersForPackagePageOptions = {
+  itemSearch?: string;
+  /** `全部` | numeric (`1`, `2`) | legacy `package_number`（僅限已指派 `package_id`） */
+  packageFilter?: string;
+};
+
+/**
+ * 包裹頁列表：只回傳已指派集運包裹的訂單（`package_id` 可 join `packages`）。
+ * `全部` = 所有已指派；`未指定`（舊網址）視同 `全部`；其它 = 該編號或舊版文字，且仍須已指派。
+ */
+export async function fetchOrdersForPackagePage(
+  options: FetchOrdersForPackagePageOptions = {},
+): Promise<{
+  data: OrderWithPackageNumber[] | null;
+  error: { message: string } | null;
+}> {
+  const raw = options.packageFilter?.trim() ?? "全部";
+  const pkgFilter = raw === "未指定" ? "全部" : raw;
+
+  const { data: pkgs, error: pkgsError } = await supabase
+    .from("packages")
+    .select("id, number");
+  if (pkgsError) {
+    return { data: null, error: { message: pkgsError.message } };
+  }
+  const packageIds = new Set((pkgs ?? []).map((p) => p.id));
+  const packageNumbers = new Set((pkgs ?? []).map((p) => String(p.number)));
+
+  let query = supabase
+    .from("orders")
+    .select("*, packages(number, international_shipping_fee)")
+    .order("purchase_date", { ascending: false })
+    .order("created_at", { ascending: false })
+    .limit(PACKAGE_PAGE_LIMIT);
+
+  const itemSearch = options.itemSearch?.trim() ?? "";
+  if (itemSearch.length > 0) {
+    query = query.ilike("item", `%${escapeIlikePattern(itemSearch)}%`);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    return { data: null, error: { message: error.message } };
+  }
+
+  const assigned = ((data as OrderWithPackageNumber[] | null) ?? []).filter((row) => {
+    const byFk = row.package_id != null && packageIds.has(row.package_id);
+    const byLegacyLabel =
+      !!row.package_number &&
+      row.package_number !== "未指定" &&
+      packageNumbers.has(row.package_number);
+    return byFk || byLegacyLabel;
+  });
+
+  const filtered =
+    pkgFilter === "全部"
+      ? assigned
+      : assigned.filter((row) => {
+          const asInt = Number.parseInt(pkgFilter, 10);
+          if (Number.isFinite(asInt) && String(asInt) === pkgFilter) {
+            const joined = row.packages as { number: number } | { number: number }[] | null;
+            const joinedNumber = Array.isArray(joined)
+              ? joined[0]?.number
+              : joined != null
+                ? joined.number
+                : undefined;
+            if (typeof joinedNumber === "number") {
+              return String(joinedNumber) === pkgFilter;
+            }
+            return row.package_number === pkgFilter;
+          }
+          return row.package_number === pkgFilter;
+        });
+
+  return {
+    data: filtered,
+    error: null,
+  };
+}
+
 export type OrderListFieldsPatch = {
   payer?: OrderRecord["payer"];
   paymentStatus?: OrderRecord["payment_status"];
@@ -221,11 +321,32 @@ export async function updateOrderFields(
   orderId: string,
   patch: OrderListFieldsPatch,
 ): Promise<{ error: { message: string } | null }> {
-  const row: Record<string, string> = {};
+  const row: Record<string, string | null> = {};
   if (patch.payer !== undefined) row.payer = patch.payer;
   if (patch.paymentStatus !== undefined) row.payment_status = patch.paymentStatus;
   if (patch.productStatus !== undefined) row.product_status = patch.productStatus;
-  if (patch.packageNumber !== undefined) row.package_number = patch.packageNumber;
+  if (patch.packageNumber !== undefined) {
+    const packageNumber = patch.packageNumber.trim();
+    row.package_number = packageNumber;
+
+    if (packageNumber === "未指定") {
+      row.package_id = null;
+    } else {
+      const asInt = Number.parseInt(packageNumber, 10);
+      if (Number.isFinite(asInt) && String(asInt) === packageNumber) {
+        const { data: pkgRow, error: pkgErr } = await supabase
+          .from("packages")
+          .select("id")
+          .eq("number", asInt)
+          .maybeSingle();
+        if (pkgErr) return { error: { message: pkgErr.message } };
+        if (!pkgRow) return { error: { message: `找不到包裹編號 ${packageNumber}` } };
+        row.package_id = pkgRow.id;
+      } else {
+        row.package_id = null;
+      }
+    }
+  }
 
   if (Object.keys(row).length === 0) return { error: null };
 
@@ -241,6 +362,23 @@ export async function updateOrderFromDetailForm(
   const purchaseDate =
     values.purchaseDate.trim().slice(0, 10) ||
     new Date().toISOString().slice(0, 10);
+  const packageNumber = values.packageNumber.trim();
+  let packageId: string | null = null;
+  if (packageNumber !== "未指定") {
+    const asInt = Number.parseInt(packageNumber, 10);
+    if (Number.isFinite(asInt) && String(asInt) === packageNumber) {
+      const { data: pkgRow, error: pkgErr } = await supabase
+        .from("packages")
+        .select("id")
+        .eq("number", asInt)
+        .maybeSingle();
+      if (pkgErr) return { data: null, error: { message: pkgErr.message } };
+      if (!pkgRow) {
+        return { data: null, error: { message: `找不到包裹編號 ${packageNumber}` } };
+      }
+      packageId = pkgRow.id;
+    }
+  }
 
   const { data, error } = await supabase
     .from("orders")
@@ -248,12 +386,15 @@ export async function updateOrderFromDetailForm(
       item: values.item.trim(),
       purchase_date: purchaseDate,
       buyer: values.buyer.trim(),
+      domestic_delivery_address: values.domesticDeliveryAddress.trim(),
       payer: values.payer as OrderRecord["payer"],
       cost: values.cost,
       price: values.price,
+      domestic_shipping_fee: values.domesticShippingFee,
       payment_status: values.paymentStatus as OrderRecord["payment_status"],
       product_status: values.productStatus as OrderRecord["product_status"],
-      package_number: values.packageNumber,
+      package_number: packageNumber,
+      package_id: packageId,
     })
     .eq("id", orderId)
     .select()
