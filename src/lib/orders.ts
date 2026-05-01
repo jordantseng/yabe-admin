@@ -11,6 +11,31 @@ export type OrderWithPackageNumber = OrderRecord & {
   } | null;
 };
 
+/** Human-visible package group label for an order row (與包裹頁分組一致). */
+export function packageNumberLabelFromOrderRow(row: OrderWithPackageNumber): string {
+  const rel = row.packages as { number: number } | { number: number }[] | null;
+  const num = Array.isArray(rel)
+    ? rel[0]?.number
+    : rel != null
+      ? rel.number
+      : undefined;
+  if (typeof num === "number") {
+    return String(num);
+  }
+  if (row.package_number && row.package_number !== "未指定") {
+    return row.package_number;
+  }
+  return "未指定";
+}
+
+/** 資料庫有包裹、但目前篩選結果內沒有任何訂單時，仍顯示分組標題用。 */
+export type PackagePageEmptyPackageStub = {
+  number: string;
+  notes: string;
+  internationalShippingFee: number;
+  isSettled: boolean;
+};
+
 export type OrdersTableRow = {
   id: string;
   item: string;
@@ -126,6 +151,11 @@ export type FetchOrdersOptions = {
 
 function escapeIlikePattern(value: string): string {
   return value.replaceAll("\\", "\\\\").replaceAll("%", "\\%").replaceAll("_", "\\_");
+}
+
+/** PostgREST `.or()` 內文字欄位值用雙引號包起，避免 `未指定` 等被誤判。 */
+function postgrestFilterQuoted(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -256,8 +286,6 @@ export async function fetchOrders(
   };
 }
 
-const PACKAGE_PAGE_LIMIT = 200;
-
 export type FetchOrdersForPackagePageOptions = {
   itemSearch?: string;
   /** `全部` | numeric (`1`, `2`) | legacy `package_number`（僅限已指派 `package_id`） */
@@ -266,40 +294,114 @@ export type FetchOrdersForPackagePageOptions = {
   /** `全部` | `虹` | `藍` */
   payer?: string;
   page?: number;
-  pageSize?: number;
+  /** 每頁幾個包裹分組（預設 2；依建立時間新→舊分頁） */
+  packagesPerPage?: number;
+};
+
+type PkgListRow = {
+  id: string;
+  number: number;
+  notes: string | null;
+  international_shipping_fee: number;
+  is_settled: boolean;
+  created_at: string;
 };
 
 /**
- * 包裹頁列表：只回傳已指派集運包裹的訂單（`package_id` 可 join `packages`）。
- * `全部` = 所有已指派；`未指定`（舊網址）視同 `全部`；其它 = 該編號或舊版文字，且仍須已指派。
+ * 包裹頁：以 **包裹** 分頁。排序為 **新→舊**（`packages.created_at` 遞減，同時間則 `number` 遞減）。
+ * 只載入本頁包裹底下訂單；第 1 頁且篩選「全部」時併入 `未指定` 訂單。
+ * `count` = 用於分頁的包裹總數；`emptyPackageStubs` = 本頁包裹在篩選後無訂單時仍顯示空分組。
  */
 export async function fetchOrdersForPackagePage(
   options: FetchOrdersForPackagePageOptions = {},
 ): Promise<{
   data: OrderWithPackageNumber[] | null;
   count: number;
+  emptyPackageStubs: PackagePageEmptyPackageStub[];
   error: { message: string } | null;
 }> {
   const raw = options.packageFilter?.trim() ?? "全部";
   const pkgFilter = raw === "未指定" ? "全部" : raw;
   const page = Math.max(1, options.page ?? 1);
-  const pageSize = Math.min(200, Math.max(1, options.pageSize ?? 15));
+  const packagesPerPage = Math.min(50, Math.max(1, options.packagesPerPage ?? 2));
 
   const { data: pkgs, error: pkgsError } = await supabase
     .from("packages")
-    .select("id, number");
+    .select("id, number, notes, international_shipping_fee, is_settled, created_at");
   if (pkgsError) {
-    return { data: null, count: 0, error: { message: pkgsError.message } };
+    return {
+      data: null,
+      count: 0,
+      emptyPackageStubs: [],
+      error: { message: pkgsError.message },
+    };
   }
-  const packageIds = new Set((pkgs ?? []).map((p) => p.id));
-  const packageNumbers = new Set((pkgs ?? []).map((p) => String(p.number)));
+
+  const pkgRows = ((pkgs ?? []) as PkgListRow[]).slice().sort((a, b) => {
+    const ta = Date.parse(a.created_at);
+    const tb = Date.parse(b.created_at);
+    const na = Number.isFinite(ta) ? ta : 0;
+    const nb = Number.isFinite(tb) ? tb : 0;
+    if (nb !== na) return nb - na;
+    return b.number - a.number;
+  });
+  const packageNumbers = new Set(pkgRows.map((p) => String(p.number)));
+
+  let pagePackages: PkgListRow[] = [];
+  let packageCountForPagination = 0;
+
+  if (pkgFilter === "全部") {
+    packageCountForPagination = pkgRows.length;
+    const fromPkg = (page - 1) * packagesPerPage;
+    pagePackages = pkgRows.slice(fromPkg, fromPkg + packagesPerPage);
+  } else {
+    const asInt = Number.parseInt(pkgFilter, 10);
+    const matching = pkgRows.filter((p) => {
+      if (Number.isFinite(asInt) && String(asInt) === pkgFilter) {
+        return p.number === asInt;
+      }
+      return String(p.number) === pkgFilter;
+    });
+    packageCountForPagination = matching.length;
+    pagePackages = matching;
+  }
+
+  const orParts: string[] = [];
+  if (pagePackages.length > 0) {
+    const ids = pagePackages.map((p) => p.id).join(",");
+    const nums = pagePackages
+      .map((p) => postgrestFilterQuoted(String(p.number)))
+      .join(",");
+    orParts.push(`package_id.in.(${ids})`);
+    orParts.push(`package_number.in.(${nums})`);
+  }
+  if (page === 1 && pkgFilter === "全部") {
+    orParts.push(
+      `and(package_id.is.null,package_number.eq.${postgrestFilterQuoted("未指定")})`,
+    );
+  }
+
+  if (orParts.length === 0) {
+    const emptyStubs: PackagePageEmptyPackageStub[] = pagePackages.map((p) => ({
+      number: String(p.number),
+      notes: p.notes?.trim() ?? "",
+      internationalShippingFee: p.international_shipping_fee ?? 0,
+      isSettled: p.is_settled === true,
+    }));
+    return {
+      data: [],
+      count: packageCountForPagination,
+      emptyPackageStubs: emptyStubs,
+      error: null,
+    };
+  }
 
   let query = supabase
     .from("orders")
     .select("*, packages(number, international_shipping_fee, notes, is_settled)")
+    .or(orParts.join(","))
     .order("purchase_date", { ascending: false })
-    .order("created_at", { ascending: false })
-    .limit(PACKAGE_PAGE_LIMIT);
+    .order("created_at", { ascending: false });
 
   const itemSearch = options.itemSearch?.trim() ?? "";
   if (itemSearch.length > 0) {
@@ -317,39 +419,32 @@ export async function fetchOrdersForPackagePage(
   const { data, error } = await query;
 
   if (error) {
-    return { data: null, count: 0, error: { message: error.message } };
+    return {
+      data: null,
+      count: 0,
+      emptyPackageStubs: [],
+      error: { message: error.message },
+    };
   }
 
-  const assigned = ((data as OrderWithPackageNumber[] | null) ?? []).filter((row) => {
-    const byFk = row.package_id != null && packageIds.has(row.package_id);
-    const byLegacyLabel =
+  const pageNumSet = new Set(pagePackages.map((p) => String(p.number)));
+  const pageIdSet = new Set(pagePackages.map((p) => p.id));
+
+  const scoped = ((data as OrderWithPackageNumber[] | null) ?? []).filter((row) => {
+    const label = packageNumberLabelFromOrderRow(row);
+    if (label === "未指定") {
+      return page === 1 && pkgFilter === "全部";
+    }
+    const byFk = row.package_id != null && pageIdSet.has(row.package_id);
+    const byLegacy =
       !!row.package_number &&
       row.package_number !== "未指定" &&
+      pageNumSet.has(row.package_number) &&
       packageNumbers.has(row.package_number);
-    return byFk || byLegacyLabel;
+    return byFk || byLegacy;
   });
 
-  const filtered =
-    pkgFilter === "全部"
-      ? assigned
-      : assigned.filter((row) => {
-          const asInt = Number.parseInt(pkgFilter, 10);
-          if (Number.isFinite(asInt) && String(asInt) === pkgFilter) {
-            const joined = row.packages as { number: number } | { number: number }[] | null;
-            const joinedNumber = Array.isArray(joined)
-              ? joined[0]?.number
-              : joined != null
-                ? joined.number
-                : undefined;
-            if (typeof joinedNumber === "number") {
-              return String(joinedNumber) === pkgFilter;
-            }
-            return row.package_number === pkgFilter;
-          }
-          return row.package_number === pkgFilter;
-        });
-
-  const sorted = [...filtered].sort((a, b) => {
+  const sorted = [...scoped].sort((a, b) => {
     const buyerCmp = a.buyer.localeCompare(b.buyer, "zh-Hant");
     if (buyerCmp !== 0) return buyerCmp;
     const aDate = Date.parse(a.purchase_date);
@@ -357,10 +452,30 @@ export async function fetchOrdersForPackagePage(
     return bDate - aDate;
   });
 
-  const count = sorted.length;
-  const from = (page - 1) * pageSize;
-  const paginated = sorted.slice(from, from + pageSize);
-  return { data: paginated, count, error: null };
+  const packageNumbersWithOrders = new Set<string>();
+  for (const row of sorted) {
+    packageNumbersWithOrders.add(packageNumberLabelFromOrderRow(row));
+  }
+
+  const emptyPackageStubs: PackagePageEmptyPackageStub[] = [];
+  for (const p of pagePackages) {
+    const label = String(p.number);
+    if (!packageNumbersWithOrders.has(label)) {
+      emptyPackageStubs.push({
+        number: label,
+        notes: p.notes?.trim() ?? "",
+        internationalShippingFee: p.international_shipping_fee ?? 0,
+        isSettled: p.is_settled === true,
+      });
+    }
+  }
+
+  return {
+    data: sorted,
+    count: packageCountForPagination,
+    emptyPackageStubs,
+    error: null,
+  };
 }
 
 export type OrderListFieldsPatch = {

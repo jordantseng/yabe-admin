@@ -52,7 +52,7 @@ import {
 } from "@/lib/orders-list-url";
 import { fetchPackageNumbersFromDb } from "@/lib/packages";
 
-const ORDERS_PAGE_SIZE = 15;
+const ORDERS_PAGE_SIZE = 12;
 const ORDERS_QUERY_KEY = ["orders", "list"] as const;
 const ORDERS_TOTALS_QUERY_KEY = ["orders", "totals"] as const;
 const PACKAGE_NUMBERS_QUERY_KEY = ["packages", "numbers"] as const;
@@ -86,7 +86,16 @@ function OrdersPage() {
   );
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
   const [isMoveToPopoverOpen, setIsMoveToPopoverOpen] = useState(false);
+  const [bulkActionType, setBulkActionType] = useState<
+    "包裹編號" | "收款狀態" | "商品狀態"
+  >("包裹編號");
   const [bulkPackageNumber, setBulkPackageNumber] = useState("未指定");
+  const [bulkPaymentStatus, setBulkPaymentStatus] = useState<
+    "未收款" | "已收款" | "已入帳"
+  >("未收款");
+  const [bulkProductStatus, setBulkProductStatus] = useState<
+    "未購買" | "已購買" | "到虹家" | "集運回台" | "到台灣" | "已出貨"
+  >("未購買");
   const queryClient = useQueryClient();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -398,6 +407,95 @@ function OrdersPage() {
     setIsMoveToPopoverOpen(false);
     invalidateOrdersData();
   };
+  const applyBulkPaymentStatus = async () => {
+    const ids = selectedOrderIds;
+    if (ids.length === 0) {
+      return;
+    }
+    setListFieldError(null);
+    const orderById = new Map(orders.map((order) => [order.id, order]));
+    const lockedIds = ids.filter(
+      (id) => orderById.get(id)?.productStatus === "已出貨"
+    );
+    const updatableIds = ids.filter((id) => !lockedIds.includes(id));
+    if (updatableIds.length === 0) {
+      setListFieldError("已出貨訂單不能透過批次修改收款狀態");
+      return;
+    }
+    const results = await Promise.all(
+      updatableIds.map((id) =>
+        updateOrderFields(id, { paymentStatus: bulkPaymentStatus })
+      )
+    );
+    const failed = results.find((r) => r.error);
+    if (failed?.error) {
+      setListFieldError(failed.error.message);
+      return;
+    }
+    if (lockedIds.length > 0) {
+      setListFieldError("部分已出貨訂單未變更收款狀態（已自動略過）");
+    }
+    setSelectedOrderIds(lockedIds);
+    setIsMoveToPopoverOpen(false);
+    invalidateOrdersData();
+  };
+  const applyBulkProductStatus = async () => {
+    const ids = selectedOrderIds;
+    if (ids.length === 0) {
+      return;
+    }
+    setListFieldError(null);
+    const orderById = new Map(orders.map((order) => [order.id, order]));
+    const lockedIds = ids.filter(
+      (id) => orderById.get(id)?.productStatus === "已出貨"
+    );
+    const paymentBlockedIds = ids.filter(
+      (id) =>
+        bulkProductStatus === "已出貨" &&
+        orderById.get(id)?.paymentStatus !== "已入帳"
+    );
+    const updatableIds = ids.filter(
+      (id) => !lockedIds.includes(id) && !paymentBlockedIds.includes(id)
+    );
+    if (updatableIds.length === 0) {
+      if (bulkProductStatus === "已出貨" && paymentBlockedIds.length > 0) {
+        setListFieldError("收款狀態尚未入帳，不能批次改為已出貨");
+      } else {
+        setListFieldError("已出貨訂單不能透過批次修改商品狀態");
+      }
+      return;
+    }
+    const results = await Promise.all(
+      updatableIds.map((id) =>
+        updateOrderFields(id, { productStatus: bulkProductStatus })
+      )
+    );
+    const failed = results.find((r) => r.error);
+    if (failed?.error) {
+      setListFieldError(failed.error.message);
+      return;
+    }
+    if (lockedIds.length > 0 || paymentBlockedIds.length > 0) {
+      setListFieldError(
+        "部分訂單未變更商品狀態（已出貨或收款未入帳時不可改為已出貨）"
+      );
+    }
+    const skippedIds = Array.from(new Set([...lockedIds, ...paymentBlockedIds]));
+    setSelectedOrderIds(skippedIds);
+    setIsMoveToPopoverOpen(false);
+    invalidateOrdersData();
+  };
+  const applySelectedBulkAction = async () => {
+    if (bulkActionType === "包裹編號") {
+      await applyBulkPackageNumber();
+      return;
+    }
+    if (bulkActionType === "收款狀態") {
+      await applyBulkPaymentStatus();
+      return;
+    }
+    await applyBulkProductStatus();
+  };
 
   return (
     <main style={{ padding: "2rem", fontFamily: "system-ui, sans-serif" }}>
@@ -613,40 +711,127 @@ function OrdersPage() {
                     type="button"
                     variant="outline"
                     size="icon"
-                    aria-label="move to"
-                    title="move to"
+                    aria-label="批次操作"
+                    title="批次操作"
                   >
                     <FolderInputIcon className="h-4 w-4" />
                   </Button>
                 }
               />
-              <PopoverContent className="w-64 space-y-3" align="start">
-                <p className="text-sm font-medium">指定包裹編號</p>
-                <Select
-                  value={bulkPackageNumber}
-                  onValueChange={(value) =>
-                    value && setBulkPackageNumber(value)
-                  }
-                >
-                  <SelectTrigger aria-label="批次設定包裹編號">
-                    <SelectValue placeholder="包裹編號" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="未指定">未指定</SelectItem>
-                    {packageNumberOptions.map((packageNumber) => (
-                      <SelectItem key={packageNumber} value={packageNumber}>
-                        {packageNumber}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button
-                  type="button"
-                  className="w-full"
-                  onClick={applyBulkPackageNumber}
-                >
-                  套用到已選訂單
-                </Button>
+              <PopoverContent className="w-72 space-y-1" align="start">
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">修改欄位</p>
+                  <Select
+                    value={bulkActionType}
+                    onValueChange={(value) => {
+                      if (
+                        value === "包裹編號" ||
+                        value === "收款狀態" ||
+                        value === "商品狀態"
+                      ) {
+                        setBulkActionType(value);
+                      }
+                    }}
+                  >
+                    <SelectTrigger aria-label="批次操作類型">
+                      <SelectValue placeholder="批次操作類型" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="包裹編號">包裹編號</SelectItem>
+                      <SelectItem value="收款狀態">收款狀態</SelectItem>
+                      <SelectItem value="商品狀態">商品狀態</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <p className="text-sm font-medium">設定值</p>
+                  {bulkActionType === "包裹編號" ? (
+                    <Select
+                      value={bulkPackageNumber}
+                      onValueChange={(value) =>
+                        value && setBulkPackageNumber(value)
+                      }
+                    >
+                      <SelectTrigger aria-label="批次設定包裹編號">
+                        <SelectValue placeholder="包裹編號" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="未指定">未指定</SelectItem>
+                        {packageNumberOptions.map((packageNumber) => (
+                          <SelectItem key={packageNumber} value={packageNumber}>
+                            {packageNumber}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : bulkActionType === "收款狀態" ? (
+                    <Select
+                      value={bulkPaymentStatus}
+                      onValueChange={(value) => {
+                        if (
+                          value === "未收款" ||
+                          value === "已收款" ||
+                          value === "已入帳"
+                        ) {
+                          setBulkPaymentStatus(value);
+                        }
+                      }}
+                    >
+                      <SelectTrigger
+                        aria-label="批次設定收款狀態"
+                        className={paymentStatusTextClass(bulkPaymentStatus)}
+                      >
+                        <SelectValue placeholder="收款狀態" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="未收款" className="text-red-500">
+                          未收款
+                        </SelectItem>
+                        <SelectItem value="已收款" className="text-amber-500">
+                          已收款
+                        </SelectItem>
+                        <SelectItem value="已入帳" className="text-green-500">
+                          已入帳
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Select
+                      value={bulkProductStatus}
+                      onValueChange={(value) => {
+                        if (
+                          value === "未購買" ||
+                          value === "已購買" ||
+                          value === "到虹家" ||
+                          value === "集運回台" ||
+                          value === "到台灣" ||
+                          value === "已出貨"
+                        ) {
+                          setBulkProductStatus(value);
+                        }
+                      }}
+                    >
+                      <SelectTrigger aria-label="批次設定商品狀態">
+                        <SelectValue placeholder="商品狀態" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="未購買">未購買</SelectItem>
+                        <SelectItem value="已購買">已購買</SelectItem>
+                        <SelectItem value="到虹家">到虹家</SelectItem>
+                        <SelectItem value="集運回台">集運回台</SelectItem>
+                        <SelectItem value="到台灣">到台灣</SelectItem>
+                        <SelectItem value="已出貨">已出貨</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <Button
+                    type="button"
+                    className="w-full"
+                    onClick={() => void applySelectedBulkAction()}
+                  >
+                    套用到已選訂單
+                  </Button>
+                </div>
               </PopoverContent>
             </Popover>
           )}

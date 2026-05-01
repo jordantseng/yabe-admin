@@ -46,13 +46,16 @@ import {
 import { packagesListSearchParams } from "@/lib/packages-list-url";
 import {
   fetchOrdersForPackagePage,
+  packageNumberLabelFromOrderRow,
   revenueStringFromCostPrice,
   updateOrderFields,
   type OrderWithPackageNumber,
+  type PackagePageEmptyPackageStub,
 } from "@/lib/orders";
 import type { OrderPayer, OrderProductStatus } from "@/types/database";
 
-const PACKAGE_PAGE_SIZE = 15;
+/** 每頁幾個包裹（與後端 `packagesPerPage` 預設一致；排序新→舊） */
+const PACKAGE_GROUPS_PER_PAGE = 2;
 const PACKAGE_ROWS_QUERY_KEY = ["packages", "page-rows"] as const;
 const PACKAGE_NUMBERS_QUERY_KEY = ["packages", "numbers"] as const;
 const PACKAGE_NEXT_NUMBER_QUERY_KEY = ["packages", "next-number-peek"] as const;
@@ -91,22 +94,6 @@ function purchaseDateSlice(value: string): string {
   return value.length >= 10 ? value.slice(0, 10) : value;
 }
 
-function displayPackageNumber(row: OrderWithPackageNumber): string {
-  const rel = row.packages as { number: number } | { number: number }[] | null;
-  const num = Array.isArray(rel)
-    ? rel[0]?.number
-    : rel != null
-    ? rel.number
-    : undefined;
-  if (typeof num === "number") {
-    return String(num);
-  }
-  if (row.package_number && row.package_number !== "未指定") {
-    return row.package_number;
-  }
-  return "未指定";
-}
-
 function orderToPackageTableRow(row: OrderWithPackageNumber): PackageTableRow {
   const packageRel = row.packages as {
     international_shipping_fee?: number;
@@ -115,7 +102,7 @@ function orderToPackageTableRow(row: OrderWithPackageNumber): PackageTableRow {
   } | null;
   return {
     id: row.id,
-    packageNumber: displayPackageNumber(row),
+    packageNumber: packageNumberLabelFromOrderRow(row),
     packageNotes: packageRel?.notes?.trim() ?? "",
     packageSettled: packageRel?.is_settled === true,
     item: row.item,
@@ -167,6 +154,34 @@ function groupPackageRows(
   }
   const labels = Array.from(map.keys()).sort(comparePackageGroupLabels);
   return labels.map((label) => ({ label, rows: map.get(label)! }));
+}
+
+type PackageTableGroup = {
+  label: string;
+  rows: PackageTableRow[];
+  emptyStub?: PackagePageEmptyPackageStub;
+};
+
+function mergePackageTableGroups(
+  rows: PackageTableRow[],
+  emptyStubs: PackagePageEmptyPackageStub[],
+): PackageTableGroup[] {
+  const fromOrders = groupPackageRows(rows);
+  const byLabel = new Map<string, PackageTableGroup>();
+  for (const g of fromOrders) {
+    byLabel.set(g.label, { label: g.label, rows: g.rows });
+  }
+  for (const stub of emptyStubs) {
+    if (!byLabel.has(stub.number)) {
+      byLabel.set(stub.number, {
+        label: stub.number,
+        rows: [],
+        emptyStub: stub,
+      });
+    }
+  }
+  const labels = Array.from(byLabel.keys()).sort(comparePackageGroupLabels);
+  return labels.map((label) => byLabel.get(label)!);
 }
 
 function PackagePage() {
@@ -224,7 +239,7 @@ function PackagePage() {
         productStatus: listUrl.product,
         payer: listUrl.payer,
         page: listUrl.page,
-        pageSize: PACKAGE_PAGE_SIZE,
+        packagesPerPage: PACKAGE_GROUPS_PER_PAGE,
       });
       if (res.error) {
         throw new Error(res.error.message);
@@ -232,6 +247,7 @@ function PackagePage() {
       return {
         rows: (res.data ?? []).map(orderToPackageTableRow),
         count: res.count,
+        emptyPackageStubs: res.emptyPackageStubs,
       };
     },
   });
@@ -312,7 +328,7 @@ function PackagePage() {
   }, [listUrl.pkg, setListUrl]);
 
   const totalRows = rowsQuery.data?.count ?? 0;
-  const totalPages = Math.max(1, Math.ceil(totalRows / PACKAGE_PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(totalRows / PACKAGE_GROUPS_PER_PAGE));
   const safeCurrentPage = Math.min(listUrl.page, totalPages);
 
   useEffect(() => {
@@ -339,10 +355,15 @@ function PackagePage() {
     });
   };
   const rows = rowsQuery.data?.rows ?? EMPTY_PACKAGE_ROWS;
+  const emptyPackageStubs = rowsQuery.data?.emptyPackageStubs ?? [];
   const packageNumberOptions =
     packageNumbersQuery.data ?? EMPTY_PACKAGE_NUMBERS;
   const rowsLoading = rowsQuery.isLoading;
   const rowsError = (rowsQuery.error as Error | null)?.message ?? null;
+  const hasOrderFilters =
+    listUrl.q.trim() !== "" ||
+    listUrl.product !== "全部" ||
+    listUrl.payer !== "全部";
 
   const filterPackageSelectValues = useMemo(() => {
     const ordered: string[] = ["全部"];
@@ -367,7 +388,10 @@ function PackagePage() {
     }
     return ordered;
   }, [packageNumberOptions]);
-  const groupedRows = useMemo(() => groupPackageRows(rows), [rows]);
+  const groupedRows = useMemo(
+    () => mergePackageTableGroups(rows, emptyPackageStubs),
+    [rows, emptyPackageStubs],
+  );
   const totals = useMemo(() => {
     let totalPrice = 0;
     let totalCost = 0;
@@ -514,7 +538,10 @@ function PackagePage() {
 
   const openEditPackageFeeDialog = (pkg: string, currentFee: string) => {
     const group = groupedRows.find((g) => g.label === pkg);
-    if (group?.rows[0]?.packageSettled) {
+    const settled =
+      group?.rows[0]?.packageSettled === true ||
+      group?.emptyStub?.isSettled === true;
+    if (settled) {
       return;
     }
     setEditPackageFeeError(null);
@@ -890,7 +917,7 @@ function PackagePage() {
           </TableHeader>
           <TableBody>
             {rowsLoading ? (
-              Array.from({ length: PACKAGE_PAGE_SIZE }, (_, rowIndex) => (
+              Array.from({ length: 12 }, (_, rowIndex) => (
                 <TableRow key={`skeleton-${rowIndex}`}>
                   <TableCell>
                     <Skeleton className="h-8 w-32" />
@@ -951,7 +978,7 @@ function PackagePage() {
                   無法載入列表，請見上方錯誤說明。
                 </TableCell>
               </TableRow>
-            ) : rows.length === 0 ? (
+            ) : groupedRows.length === 0 ? (
               <TableRow>
                 <TableCell
                   colSpan={16}
@@ -967,7 +994,16 @@ function PackagePage() {
                 </TableCell>
               </TableRow>
             ) : (
-              groupedRows.map((group) => (
+              groupedRows.map((group) => {
+                const headerSettled =
+                  group.rows[0]?.packageSettled === true ||
+                  group.emptyStub?.isSettled === true;
+                const headerIntlFee =
+                  group.rows[0]?.internationalShippingFee ??
+                  String(group.emptyStub?.internationalShippingFee ?? 0);
+                const headerNotes =
+                  group.rows[0]?.packageNotes ?? group.emptyStub?.notes ?? "";
+                return (
                 <Fragment key={group.label}>
                   <TableRow className="bg-muted/60 hover:bg-muted/60">
                     <TableCell
@@ -977,35 +1013,33 @@ function PackagePage() {
                       {group.label === "未指定"
                         ? "未指派包裹"
                         : `包裹${group.label}`}
-                      {group.rows[0]?.packageSettled === true && (
+                      {headerSettled && (
                         <span className="ml-2 font-normal text-muted-foreground">
                           （已結清）
                         </span>
                       )}
                       {group.label !== "未指定" && (
                         <span className="ml-3 font-normal text-muted-foreground">
-                          國際運費:{" "}
-                          {group.rows[0]?.internationalShippingFee ?? "0"}
+                          國際運費: {headerIntlFee}
                         </span>
                       )}
-                      {group.label !== "未指定" &&
-                        (group.rows[0]?.packageNotes ?? "") !== "" && (
+                      {group.label !== "未指定" && headerNotes !== "" && (
                           <span
                             className="ml-3 inline-block max-w-[24rem] truncate align-bottom font-normal text-muted-foreground"
-                            title={group.rows[0]?.packageNotes ?? ""}
+                            title={headerNotes}
                           >
-                            備註: {group.rows[0]?.packageNotes}
+                            備註: {headerNotes}
                           </span>
                         )}
                     </TableCell>
                     <TableCell className="py-3 space-x-2">
-                      {group.label !== "未指定" &&
-                        group.rows[0]?.packageSettled !== true && (
+                      {group.label !== "未指定" && !headerSettled && (
                           <Button
                             type="button"
                             variant="default"
                             className="h-8 px-3"
                             disabled={
+                              group.rows.length === 0 ||
                               !group.rows.every(
                                 (r) => r.productStatus === "已出貨"
                               ) || settlePackageMutation.isPending
@@ -1015,8 +1049,7 @@ function PackagePage() {
                             結清包裹
                           </Button>
                         )}
-                      {group.label !== "未指定" &&
-                        group.rows[0]?.packageSettled !== true && (
+                      {group.label !== "未指定" && !headerSettled && (
                           <Button
                             type="button"
                             variant="outline"
@@ -1024,7 +1057,7 @@ function PackagePage() {
                             onClick={() =>
                               openEditPackageFeeDialog(
                                 group.label,
-                                group.rows[0]?.internationalShippingFee ?? "0"
+                                headerIntlFee
                               )
                             }
                           >
@@ -1033,7 +1066,19 @@ function PackagePage() {
                         )}
                     </TableCell>
                   </TableRow>
-                  {group.rows.map((row) => (
+                  {group.rows.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={16}
+                        className="py-4 text-center text-sm text-muted-foreground"
+                      >
+                        {hasOrderFilters
+                          ? "此包裹在目前篩選下沒有訂單。"
+                          : "此包裹尚無訂單。"}
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    group.rows.map((row) => (
                     <TableRow key={row.id}>
                       <TableCell>
                         <Select
@@ -1147,9 +1192,11 @@ function PackagePage() {
                         </Link>
                       </TableCell>
                     </TableRow>
-                  ))}
+                  ))
+                  )}
                 </Fragment>
-              ))
+                );
+              })
             )}
           </TableBody>
         </Table>
