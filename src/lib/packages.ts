@@ -58,10 +58,11 @@ export async function deletePackageByNumber(
   return { error: null };
 }
 
-/** Update package international shipping fee by human-visible `number`. */
+/** Update package international shipping fee (and optionally notes) by human-visible `number`. */
 export async function updatePackageInternationalShippingFeeByNumber(
   packageNumber: string,
   fee: number,
+  notes?: string | null,
 ): Promise<{ error: { message: string } | null }> {
   const trimmed = packageNumber.trim();
   const asInt = Number.parseInt(trimmed, 10);
@@ -69,9 +70,16 @@ export async function updatePackageInternationalShippingFeeByNumber(
     return { error: { message: `無效的包裹編號：${packageNumber}` } };
   }
   const normalized = Number.isFinite(fee) ? Math.max(0, fee) : 0;
+  const payload: {
+    international_shipping_fee: number;
+    notes?: string | null;
+  } = { international_shipping_fee: normalized };
+  if (notes !== undefined) {
+    payload.notes = notes === null ? null : String(notes).trim() || null;
+  }
   const { error } = await supabase
     .from("packages")
-    .update({ international_shipping_fee: normalized })
+    .update(payload)
     .eq("number", asInt);
   if (error) {
     return { error: { message: error.message } };

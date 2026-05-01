@@ -98,6 +98,7 @@ function OrdersPage() {
   >("未購買");
   const queryClient = useQueryClient();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const hasAppliedDefaultLatestPackageFilter = useRef(false);
 
   const ordersQuery = useQuery({
     queryKey: [ORDERS_QUERY_KEY, listUrl],
@@ -153,6 +154,38 @@ function OrdersPage() {
       return res.data ?? [];
     },
   });
+  useEffect(() => {
+    if (hasAppliedDefaultLatestPackageFilter.current) return;
+    const packageNumbers = packageNumbersQuery.data ?? [];
+    if (packageNumbers.length === 0) return;
+    if (listUrl.pkg !== "全部") return;
+    const hasPkgInUrl = new URLSearchParams(window.location.search).has("pkg");
+    if (hasPkgInUrl) {
+      hasAppliedDefaultLatestPackageFilter.current = true;
+      return;
+    }
+    const latestPackageNumber = packageNumbers.reduce<string | null>((latest, current) => {
+      if (latest == null) return current;
+      const latestNum = Number.parseInt(latest, 10);
+      const currentNum = Number.parseInt(current, 10);
+      if (!Number.isFinite(latestNum) || !Number.isFinite(currentNum)) {
+        return current > latest ? current : latest;
+      }
+      return currentNum > latestNum ? current : latest;
+    }, null);
+    if (!latestPackageNumber) return;
+    hasAppliedDefaultLatestPackageFilter.current = true;
+    void setListUrl(
+      { pkg: latestPackageNumber, page: 1 },
+      { history: "replace" }
+    );
+  }, [listUrl.pkg, packageNumbersQuery.data, setListUrl]);
+
+  useEffect(() => {
+    setDraftFilterPaymentStatus(listUrl.payment);
+    setDraftFilterProductStatus(listUrl.product);
+    setDraftFilterPackageNumber(listUrl.pkg);
+  }, [listUrl.payment, listUrl.product, listUrl.pkg]);
 
   const invalidateOrdersData = () => {
     void queryClient.invalidateQueries({ queryKey: [ORDERS_QUERY_KEY] });
@@ -346,7 +379,7 @@ function OrdersPage() {
     }
   }, [listUrl.page, patchListUrl, safeCurrentPage]);
 
-  const filterPackageSelectValues = ["全部", ...packageNumberOptions];
+  const filterPackageSelectValues = ["全部", ...packageNumberOptions.toReversed()];
   const paginatedOrderIds = orders.map((order) => order.id);
   const isAllCurrentPageSelected =
     paginatedOrderIds.length > 0 &&

@@ -1,6 +1,13 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { EyeIcon, FilterIcon, XIcon } from "lucide-react";
+import {
+  CheckIcon,
+  EyeIcon,
+  FilterIcon,
+  FolderInputIcon,
+  PencilIcon,
+  XIcon,
+} from "lucide-react";
 import { useQueryStates } from "nuqs";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -52,10 +59,14 @@ import {
   type OrderWithPackageNumber,
   type PackagePageEmptyPackageStub,
 } from "@/lib/orders";
-import type { OrderPayer, OrderProductStatus } from "@/types/database";
+import type {
+  OrderPayer,
+  OrderPaymentStatus,
+  OrderProductStatus,
+} from "@/types/database";
 
-/** 每頁幾個包裹（與後端 `packagesPerPage` 預設一致；排序新→舊） */
-const PACKAGE_GROUPS_PER_PAGE = 2;
+/** 每頁顯示 1 個包裹（排序新→舊） */
+const PACKAGE_GROUPS_PER_PAGE = 1;
 const PACKAGE_ROWS_QUERY_KEY = ["packages", "page-rows"] as const;
 const PACKAGE_NUMBERS_QUERY_KEY = ["packages", "numbers"] as const;
 const PACKAGE_NEXT_NUMBER_QUERY_KEY = ["packages", "next-number-peek"] as const;
@@ -82,6 +93,7 @@ export type PackageTableRow = {
   domesticShippingFee: string;
   internationalShippingFee: string;
   revenue: string;
+  paymentStatus: OrderPaymentStatus;
   productStatus: OrderProductStatus;
 };
 
@@ -121,6 +133,7 @@ function orderToPackageTableRow(row: OrderWithPackageNumber): PackageTableRow {
       packageRel?.international_shipping_fee ?? 0
     ),
     revenue: revenueStringFromCostPrice(row.cost, row.price),
+    paymentStatus: row.payment_status,
     productStatus: row.product_status,
   };
 }
@@ -206,10 +219,17 @@ function PackagePage() {
     useState<string>("全部");
   const [draftFilterPayer, setDraftFilterPayer] = useState<string>("全部");
   const [rowFieldError, setRowFieldError] = useState<string | null>(null);
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
+  const [isBulkProductPopoverOpen, setIsBulkProductPopoverOpen] =
+    useState(false);
+  const [bulkProductStatus, setBulkProductStatus] = useState<
+    "未購買" | "已購買" | "到虹家" | "集運回台" | "到台灣" | "已出貨"
+  >("未購買");
   const [isEditPackageFeeDialogOpen, setIsEditPackageFeeDialogOpen] =
     useState(false);
   const [packageToEditFee, setPackageToEditFee] = useState<string | null>(null);
   const [editPackageFeeValue, setEditPackageFeeValue] = useState("0");
+  const [editPackageNotesValue, setEditPackageNotesValue] = useState("");
   const [editPackageFeeError, setEditPackageFeeError] = useState<string | null>(
     null
   );
@@ -250,6 +270,7 @@ function PackagePage() {
         emptyPackageStubs: res.emptyPackageStubs,
       };
     },
+    placeholderData: (previousData) => previousData,
   });
 
   const packageNumbersQuery = useQuery({
@@ -304,10 +325,11 @@ function PackagePage() {
     onSuccess: () => invalidatePackageRows(),
   });
   const editPackageFeeMutation = useMutation({
-    mutationFn: async (args: { pkg: string; fee: number }) => {
+    mutationFn: async (args: { pkg: string; fee: number; notes: string }) => {
       const { error } = await updatePackageInternationalShippingFeeByNumber(
         args.pkg,
-        args.fee
+        args.fee,
+        args.notes,
       );
       if (error) throw new Error(error.message);
     },
@@ -332,10 +354,20 @@ function PackagePage() {
   const safeCurrentPage = Math.min(listUrl.page, totalPages);
 
   useEffect(() => {
+    if (rowsQuery.isFetching || rowsQuery.isLoading || !rowsQuery.data) {
+      return;
+    }
     if (safeCurrentPage !== listUrl.page) {
       void setListUrl({ page: safeCurrentPage }, { history: "replace" });
     }
-  }, [safeCurrentPage, listUrl.page, setListUrl]);
+  }, [
+    rowsQuery.isFetching,
+    rowsQuery.isLoading,
+    rowsQuery.data,
+    safeCurrentPage,
+    listUrl.page,
+    setListUrl,
+  ]);
 
   const patchListUrl = (
     patch: Partial<{
@@ -446,8 +478,15 @@ function PackagePage() {
 
   const handleProductStatusChange = (id: string, value: string | null) => {
     const target = rows.find((row) => row.id === id);
-    if (target?.packageSettled || target?.productStatus === "已出貨") {
+    if (!target) {
+      return;
+    }
+    if (target.packageSettled || target.productStatus === "已出貨") {
       setRowFieldError("商品狀態已出貨後不可再修改");
+      return;
+    }
+    if (value === "已出貨" && target.paymentStatus !== "已入帳") {
+      setRowFieldError("收款狀態尚未入帳，不能將商品狀態改為已出貨");
       return;
     }
     if (
@@ -470,6 +509,82 @@ function PackagePage() {
         }
       })();
     }
+  };
+
+  const visibleOrderIds = rows.map((row) => row.id);
+  const isAllCurrentPageSelected =
+    visibleOrderIds.length > 0 &&
+    visibleOrderIds.every((orderId) => selectedOrderIds.includes(orderId));
+  const isSomeCurrentPageSelected =
+    visibleOrderIds.some((orderId) => selectedOrderIds.includes(orderId)) &&
+    !isAllCurrentPageSelected;
+
+  const toggleSelectAllCurrentPage = (checked: boolean) => {
+    setSelectedOrderIds((currentSelected) => {
+      if (checked) {
+        const merged = new Set([...currentSelected, ...visibleOrderIds]);
+        return Array.from(merged);
+      }
+      return currentSelected.filter((id) => !visibleOrderIds.includes(id));
+    });
+  };
+
+  const toggleSelectOrder = (orderId: string, checked: boolean) => {
+    setSelectedOrderIds((currentSelected) => {
+      if (checked) {
+        if (currentSelected.includes(orderId)) return currentSelected;
+        return [...currentSelected, orderId];
+      }
+      return currentSelected.filter((id) => id !== orderId);
+    });
+  };
+
+  const applyBulkProductStatus = async () => {
+    const ids = selectedOrderIds;
+    if (ids.length === 0) {
+      return;
+    }
+    setRowFieldError(null);
+    const orderById = new Map(rows.map((row) => [row.id, row]));
+    const lockedIds = ids.filter((id) => {
+      const row = orderById.get(id);
+      return row?.productStatus === "已出貨" || row?.packageSettled === true;
+    });
+    const paymentBlockedIds = ids.filter(
+      (id) =>
+        bulkProductStatus === "已出貨" &&
+        orderById.get(id)?.paymentStatus !== "已入帳"
+    );
+    const updatableIds = ids.filter(
+      (id) => !lockedIds.includes(id) && !paymentBlockedIds.includes(id)
+    );
+    if (updatableIds.length === 0) {
+      if (bulkProductStatus === "已出貨" && paymentBlockedIds.length > 0) {
+        setRowFieldError("收款狀態尚未入帳，不能批次改為已出貨");
+      } else {
+        setRowFieldError("已出貨或包裹已結清的訂單不能透過批次修改商品狀態");
+      }
+      return;
+    }
+    const results = await Promise.all(
+      updatableIds.map((id) =>
+        updateOrderFields(id, { productStatus: bulkProductStatus })
+      )
+    );
+    const failed = results.find((r) => r.error);
+    if (failed?.error) {
+      setRowFieldError(failed.error.message);
+      return;
+    }
+    if (lockedIds.length > 0 || paymentBlockedIds.length > 0) {
+      setRowFieldError(
+        "部分訂單未變更商品狀態（已出貨、包裹已結清，或收款未入帳時不可改為已出貨）"
+      );
+    }
+    const skippedIds = Array.from(new Set([...lockedIds, ...paymentBlockedIds]));
+    setSelectedOrderIds(skippedIds);
+    setIsBulkProductPopoverOpen(false);
+    invalidatePackageRows();
   };
 
   const handleCreatePackage = async () => {
@@ -536,7 +651,11 @@ function PackagePage() {
     }
   };
 
-  const openEditPackageFeeDialog = (pkg: string, currentFee: string) => {
+  const openEditPackageFeeDialog = (
+    pkg: string,
+    currentFee: string,
+    currentNotes: string,
+  ) => {
     const group = groupedRows.find((g) => g.label === pkg);
     const settled =
       group?.rows[0]?.packageSettled === true ||
@@ -547,6 +666,7 @@ function PackagePage() {
     setEditPackageFeeError(null);
     setPackageToEditFee(pkg);
     setEditPackageFeeValue(currentFee);
+    setEditPackageNotesValue(currentNotes);
     setIsEditPackageFeeDialogOpen(true);
   };
 
@@ -560,6 +680,7 @@ function PackagePage() {
       await editPackageFeeMutation.mutateAsync({
         pkg: packageToEditFee,
         fee: Number.isNaN(parsed) ? 0 : parsed,
+        notes: editPackageNotesValue,
       });
     } catch (error) {
       setEditPackageFeeError((error as Error).message);
@@ -686,6 +807,7 @@ function PackagePage() {
           </Button>
         </div>
 
+        <div className="flex items-center gap-2">
         <Popover
           open={isFilterPopoverOpen}
           onOpenChange={handleFilterPopoverOpenChange}
@@ -784,6 +906,64 @@ function PackagePage() {
             </div>
           </PopoverContent>
         </Popover>
+        {selectedOrderIds.length > 0 && (
+          <Popover
+            open={isBulkProductPopoverOpen}
+            onOpenChange={setIsBulkProductPopoverOpen}
+          >
+            <PopoverTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  aria-label="批次修改商品狀態"
+                  title="批次修改商品狀態"
+                >
+                  <FolderInputIcon className="h-4 w-4" />
+                </Button>
+              }
+            />
+            <PopoverContent className="w-72 space-y-3" align="end">
+              <p className="text-sm font-medium">批次修改商品狀態</p>
+              <Select
+                value={bulkProductStatus}
+                onValueChange={(value) => {
+                  if (
+                    value === "未購買" ||
+                    value === "已購買" ||
+                    value === "到虹家" ||
+                    value === "集運回台" ||
+                    value === "到台灣" ||
+                    value === "已出貨"
+                  ) {
+                    setBulkProductStatus(value);
+                  }
+                }}
+              >
+                <SelectTrigger aria-label="批次設定商品狀態">
+                  <SelectValue placeholder="商品狀態" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="未購買">未購買</SelectItem>
+                  <SelectItem value="已購買">已購買</SelectItem>
+                  <SelectItem value="到虹家">到虹家</SelectItem>
+                  <SelectItem value="集運回台">集運回台</SelectItem>
+                  <SelectItem value="到台灣">到台灣</SelectItem>
+                  <SelectItem value="已出貨">已出貨</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                type="button"
+                className="w-full"
+                onClick={() => void applyBulkProductStatus()}
+              >
+                套用到已選訂單
+              </Button>
+            </PopoverContent>
+          </Popover>
+        )}
+        </div>
       </div>
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -897,6 +1077,20 @@ function PackagePage() {
         <Table className="min-w-[1300px]">
           <TableHeader>
             <TableRow>
+              <TableHead className="w-10">
+                <input
+                  type="checkbox"
+                  checked={isAllCurrentPageSelected}
+                  ref={(input) => {
+                    if (input) input.indeterminate = isSomeCurrentPageSelected;
+                  }}
+                  onChange={(event) =>
+                    toggleSelectAllCurrentPage(event.target.checked)
+                  }
+                  aria-label="全選目前頁面訂單"
+                  disabled={rowsLoading || groupedRows.length === 0}
+                />
+              </TableHead>
               <TableHead>包裹編號</TableHead>
               <TableHead className="min-w-48">品項</TableHead>
               <TableHead>數量</TableHead>
@@ -919,6 +1113,9 @@ function PackagePage() {
             {rowsLoading ? (
               Array.from({ length: 12 }, (_, rowIndex) => (
                 <TableRow key={`skeleton-${rowIndex}`}>
+                  <TableCell>
+                    <Skeleton className="h-4 w-4 rounded-sm" />
+                  </TableCell>
                   <TableCell>
                     <Skeleton className="h-8 w-32" />
                   </TableCell>
@@ -972,7 +1169,7 @@ function PackagePage() {
             ) : rowsError ? (
               <TableRow>
                 <TableCell
-                  colSpan={16}
+                  colSpan={17}
                   className="h-24 text-center text-sm text-muted-foreground"
                 >
                   無法載入列表，請見上方錯誤說明。
@@ -981,7 +1178,7 @@ function PackagePage() {
             ) : groupedRows.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={16}
+                  colSpan={17}
                   className="h-24 text-center text-sm text-muted-foreground"
                 >
                   {listUrl.q.trim() !== ""
@@ -1003,73 +1200,90 @@ function PackagePage() {
                   String(group.emptyStub?.internationalShippingFee ?? 0);
                 const headerNotes =
                   group.rows[0]?.packageNotes ?? group.emptyStub?.notes ?? "";
+                const settleDisabled =
+                  group.rows.length === 0 ||
+                  !group.rows.every((r) => r.productStatus === "已出貨") ||
+                  settlePackageMutation.isPending;
                 return (
                 <Fragment key={group.label}>
                   <TableRow className="bg-muted/60 hover:bg-muted/60">
                     <TableCell
-                      colSpan={15}
+                      colSpan={16}
                       className="py-3 text-sm font-semibold tracking-tight"
                     >
-                      {group.label === "未指定"
-                        ? "未指派包裹"
-                        : `包裹${group.label}`}
-                      {headerSettled && (
-                        <span className="ml-2 font-normal text-muted-foreground">
-                          （已結清）
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span>
+                          {group.label === "未指定"
+                            ? "未指派包裹"
+                            : `包裹${group.label}`}
                         </span>
-                      )}
-                      {group.label !== "未指定" && (
-                        <span className="ml-3 font-normal text-muted-foreground">
-                          國際運費: {headerIntlFee}
-                        </span>
-                      )}
-                      {group.label !== "未指定" && headerNotes !== "" && (
+                        {headerSettled && (
+                          <span className="font-normal text-muted-foreground">
+                            （已結清）
+                          </span>
+                        )}
+                        {group.label !== "未指定" && (
+                          <span className="font-normal text-muted-foreground">
+                            國際運費: {headerIntlFee}
+                          </span>
+                        )}
+                        {group.label !== "未指定" && headerNotes !== "" && (
                           <span
-                            className="ml-3 inline-block max-w-[24rem] truncate align-bottom font-normal text-muted-foreground"
+                            className="inline-block max-w-[24rem] truncate align-bottom font-normal text-muted-foreground"
                             title={headerNotes}
                           >
                             備註: {headerNotes}
                           </span>
                         )}
+                      </div>
                     </TableCell>
-                    <TableCell className="py-3 space-x-2">
+                    <TableCell className="py-3">
                       {group.label !== "未指定" && !headerSettled && (
-                          <Button
-                            type="button"
-                            variant="default"
-                            className="h-8 px-3"
-                            disabled={
-                              group.rows.length === 0 ||
-                              !group.rows.every(
-                                (r) => r.productStatus === "已出貨"
-                              ) || settlePackageMutation.isPending
-                            }
-                            onClick={() => openSettlePackageDialog(group.label)}
-                          >
-                            結清包裹
-                          </Button>
-                        )}
-                      {group.label !== "未指定" && !headerSettled && (
+                        <div className="flex justify-end gap-2">
                           <Button
                             type="button"
                             variant="outline"
-                            className="h-8 px-3"
+                            size="icon"
+                            className="h-8 w-8 shrink-0"
+                            aria-label="修改國際運費與備註"
+                            title="修改國際運費與備註"
                             onClick={() =>
                               openEditPackageFeeDialog(
                                 group.label,
-                                headerIntlFee
+                                headerIntlFee,
+                                headerNotes,
                               )
                             }
                           >
-                            修改運費
+                            <PencilIcon className="h-4 w-4" />
                           </Button>
-                        )}
+                          <span
+                            className="inline-flex size-8 shrink-0"
+                            title="結清訂單"
+                          >
+                            <Button
+                              type="button"
+                              variant="default"
+                              size="icon"
+                              className="h-8 w-8 shrink-0"
+                              aria-label="結清訂單"
+                              title="結清訂單"
+                              disabled={settleDisabled}
+                              onClick={() =>
+                                openSettlePackageDialog(group.label)
+                              }
+                            >
+                              <CheckIcon className="h-4 w-4" />
+                            </Button>
+                          </span>
+                        </div>
+                      )}
                     </TableCell>
                   </TableRow>
                   {group.rows.length === 0 ? (
                     <TableRow>
                       <TableCell
-                        colSpan={16}
+                        colSpan={17}
                         className="py-4 text-center text-sm text-muted-foreground"
                       >
                         {hasOrderFilters
@@ -1080,6 +1294,17 @@ function PackagePage() {
                   ) : (
                     group.rows.map((row) => (
                     <TableRow key={row.id}>
+                      <TableCell>
+                        <input
+                          type="checkbox"
+                          checked={selectedOrderIds.includes(row.id)}
+                          onChange={(event) =>
+                            toggleSelectOrder(row.id, event.target.checked)
+                          }
+                          aria-label={`選擇訂單 ${row.id}`}
+                          disabled={rowsLoading}
+                        />
+                      </TableCell>
                       <TableCell>
                         <Select
                           value={row.packageNumber}
@@ -1182,7 +1407,7 @@ function PackagePage() {
                       >
                         {row.orderNotes}
                       </TableCell>
-                      <TableCell className="space-x-2">
+                      <TableCell>
                         <Link
                           to={`/orders/${row.id}`}
                           aria-label="查看訂單詳細"
@@ -1335,14 +1560,15 @@ function PackagePage() {
             setPackageToEditFee(null);
             setEditPackageFeeError(null);
             setEditPackageFeeValue("0");
+            setEditPackageNotesValue("");
           }
         }}
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>修改國際運費</DialogTitle>
+            <DialogTitle>修改包裹</DialogTitle>
             <DialogDescription>
-              包裹編號 {packageToEditFee ?? "-"} 的國際運費。
+              包裹編號 {packageToEditFee ?? "-"} 的國際運費與備註。
             </DialogDescription>
           </DialogHeader>
           {editPackageFeeError && (
@@ -1363,13 +1589,37 @@ function PackagePage() {
               </Button>
             </div>
           )}
-          <Input
-            type="number"
-            value={editPackageFeeValue}
-            onChange={(event) => setEditPackageFeeValue(event.target.value)}
-            placeholder="國際運費"
-            aria-label="國際運費"
-          />
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <label htmlFor="edit-package-fee" className="text-sm font-medium">
+                國際運費
+              </label>
+              <Input
+                id="edit-package-fee"
+                type="number"
+                value={editPackageFeeValue}
+                onChange={(event) => setEditPackageFeeValue(event.target.value)}
+                placeholder="國際運費"
+                aria-label="國際運費"
+              />
+            </div>
+            <div className="space-y-1">
+              <label htmlFor="edit-package-notes" className="text-sm font-medium">
+                備註
+              </label>
+              <textarea
+                id="edit-package-notes"
+                value={editPackageNotesValue}
+                onChange={(event) =>
+                  setEditPackageNotesValue(event.target.value)
+                }
+                placeholder="包裹備註（可留空）"
+                aria-label="包裹備註"
+                rows={3}
+                className="flex min-h-18 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-2 text-base transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 md:text-sm dark:bg-input/30 dark:disabled:bg-input/80"
+              />
+            </div>
+          </div>
           <DialogFooter>
             <DialogClose render={<Button variant="outline">取消</Button>} />
             <Button
