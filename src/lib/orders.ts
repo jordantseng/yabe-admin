@@ -7,6 +7,7 @@ export type OrderWithPackageNumber = OrderRecord & {
     number: number;
     international_shipping_fee?: number;
     notes?: string | null;
+    is_settled?: boolean;
   } | null;
 };
 
@@ -15,6 +16,9 @@ export type OrdersTableRow = {
   item: string;
   notes: string;
   purchaseDate: string;
+  recipientName: string;
+  phone: string;
+  quantity: string;
   buyer: string;
   payer: OrderRecord["payer"];
   cost: string;
@@ -30,6 +34,9 @@ export type OrderDetailFormValues = {
   item: string;
   notes: string;
   purchaseDate: string;
+  recipientName: string;
+  phone: string;
+  quantity: number;
   buyer: string;
   domesticDeliveryAddress: string;
   payer: string;
@@ -71,6 +78,9 @@ export function orderRecordToTableRow(row: OrderRecord): OrdersTableRow {
     item: row.item,
     notes: row.notes ?? "",
     purchaseDate: purchaseDateFromRecord(row.purchase_date),
+    recipientName: row.recipient_name ?? row.buyer,
+    phone: row.recipient_phone ?? "",
+    quantity: String(row.quantity),
     buyer: row.buyer,
     payer: row.payer,
     cost: String(row.cost),
@@ -88,6 +98,9 @@ export function orderRecordToDetailForm(row: OrderRecord): OrderDetailFormValues
     item: row.item,
     notes: row.notes ?? "",
     purchaseDate: purchaseDateFromRecord(row.purchase_date),
+    recipientName: row.recipient_name ?? row.buyer,
+    phone: row.recipient_phone ?? "",
+    quantity: Number(row.quantity),
     buyer: row.buyer,
     domesticDeliveryAddress: row.domestic_delivery_address ?? "",
     payer: row.payer,
@@ -162,6 +175,9 @@ export type CreateOrderInput = {
   item: string;
   notes?: string;
   purchaseDate: string;
+  recipientName: string;
+  phone: string;
+  quantity: number;
   buyer: string;
   domesticDeliveryAddress: string;
   payer: OrderRecord["payer"];
@@ -187,6 +203,9 @@ export async function createOrder(input: CreateOrderInput): Promise<{
       item: input.item.trim(),
       notes: input.notes?.trim() || null,
       purchase_date: purchaseDate,
+      recipient_name: input.recipientName.trim() || null,
+      recipient_phone: input.phone.trim() || null,
+      quantity: Number.isFinite(input.quantity) ? Math.max(1, Math.trunc(input.quantity)) : 1,
       buyer: input.buyer.trim(),
       domestic_delivery_address: input.domesticDeliveryAddress.trim(),
       payer: input.payer,
@@ -243,6 +262,7 @@ export type FetchOrdersForPackagePageOptions = {
   itemSearch?: string;
   /** `全部` | numeric (`1`, `2`) | legacy `package_number`（僅限已指派 `package_id`） */
   packageFilter?: string;
+  productStatus?: string;
   page?: number;
   pageSize?: number;
 };
@@ -274,7 +294,7 @@ export async function fetchOrdersForPackagePage(
 
   let query = supabase
     .from("orders")
-    .select("*, packages(number, international_shipping_fee, notes)")
+    .select("*, packages(number, international_shipping_fee, notes, is_settled)")
     .order("purchase_date", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(PACKAGE_PAGE_LIMIT);
@@ -282,6 +302,10 @@ export async function fetchOrdersForPackagePage(
   const itemSearch = options.itemSearch?.trim() ?? "";
   if (itemSearch.length > 0) {
     query = query.ilike("item", `%${escapeIlikePattern(itemSearch)}%`);
+  }
+  const prod = options.productStatus?.trim();
+  if (prod && prod !== "全部") {
+    query = query.eq("product_status", prod);
   }
 
   const { data, error } = await query;
@@ -319,9 +343,17 @@ export async function fetchOrdersForPackagePage(
           return row.package_number === pkgFilter;
         });
 
-  const count = filtered.length;
+  const sorted = [...filtered].sort((a, b) => {
+    const buyerCmp = a.buyer.localeCompare(b.buyer, "zh-Hant");
+    if (buyerCmp !== 0) return buyerCmp;
+    const aDate = Date.parse(a.purchase_date);
+    const bDate = Date.parse(b.purchase_date);
+    return bDate - aDate;
+  });
+
+  const count = sorted.length;
   const from = (page - 1) * pageSize;
-  const paginated = filtered.slice(from, from + pageSize);
+  const paginated = sorted.slice(from, from + pageSize);
   return { data: paginated, count, error: null };
 }
 
@@ -336,6 +368,33 @@ export async function updateOrderFields(
   orderId: string,
   patch: OrderListFieldsPatch,
 ): Promise<{ error: { message: string } | null }> {
+  const needsExistingStateCheck = patch.productStatus !== undefined;
+  const needsProductStatusCheck = patch.productStatus === "已出貨";
+  const isLockedFieldPatch =
+    patch.payer !== undefined ||
+    patch.paymentStatus !== undefined ||
+    patch.packageNumber !== undefined;
+  if (isLockedFieldPatch || needsProductStatusCheck || needsExistingStateCheck) {
+    const { data: existing, error: existingError } = await supabase
+      .from("orders")
+      .select("product_status, payment_status")
+      .eq("id", orderId)
+      .single();
+    if (existingError) return { error: { message: existingError.message } };
+    if (existing?.product_status === "已出貨") {
+      if (
+        patch.productStatus !== undefined &&
+        patch.productStatus !== existing.product_status
+      ) {
+        return { error: { message: "商品狀態已出貨後不可再修改" } };
+      }
+      return { error: { message: "商品狀態已出貨，不能修改付款人、收款狀態或包裹編號" } };
+    }
+    if (needsProductStatusCheck && existing?.payment_status !== "已入帳") {
+      return { error: { message: "收款狀態尚未入帳，不能將商品狀態改為已出貨" } };
+    }
+  }
+
   const row: Record<string, string | null> = {};
   if (patch.payer !== undefined) row.payer = patch.payer;
   if (patch.paymentStatus !== undefined) row.payment_status = patch.paymentStatus;
@@ -374,6 +433,41 @@ export async function updateOrderFromDetailForm(
   orderId: string,
   values: OrderDetailFormValues,
 ): Promise<{ data: OrderRecord | null; error: { message: string } | null }> {
+  const { data: existing, error: existingError } = await supabase
+    .from("orders")
+    .select("product_status, payer, payment_status, package_number")
+    .eq("id", orderId)
+    .single();
+  if (existingError) return { data: null, error: { message: existingError.message } };
+
+  if (existing?.product_status === "已出貨") {
+    const nextPackageNumber = values.packageNumber.trim();
+    const hasLockedFieldChanged =
+      existing.payer !== values.payer ||
+      existing.payment_status !== values.paymentStatus ||
+      existing.package_number !== nextPackageNumber;
+    const hasProductStatusChanged = values.productStatus !== existing.product_status;
+    if (hasProductStatusChanged) {
+      return {
+        data: null,
+        error: { message: "商品狀態已出貨後不可再修改" },
+      };
+    }
+    if (hasLockedFieldChanged) {
+      return {
+        data: null,
+        error: { message: "商品狀態已出貨，不能修改付款人、收款狀態或包裹編號" },
+      };
+    }
+  }
+
+  if (values.productStatus === "已出貨" && values.paymentStatus !== "已入帳") {
+    return {
+      data: null,
+      error: { message: "收款狀態尚未入帳，不能將商品狀態改為已出貨" },
+    };
+  }
+
   const purchaseDate =
     values.purchaseDate.trim().slice(0, 10) ||
     new Date().toISOString().slice(0, 10);
@@ -401,6 +495,9 @@ export async function updateOrderFromDetailForm(
       item: values.item.trim(),
       notes: values.notes.trim() || null,
       purchase_date: purchaseDate,
+      recipient_name: values.recipientName.trim() || null,
+      recipient_phone: values.phone.trim() || null,
+      quantity: Number.isFinite(values.quantity) ? Math.max(1, Math.trunc(values.quantity)) : 1,
       buyer: values.buyer.trim(),
       domestic_delivery_address: values.domesticDeliveryAddress.trim(),
       payer: values.payer as OrderRecord["payer"],

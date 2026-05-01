@@ -79,6 +79,25 @@ export async function updatePackageInternationalShippingFeeByNumber(
   return { error: null };
 }
 
+/** Mark package as settled by human-visible `number`. */
+export async function settlePackageByNumber(
+  packageNumber: string,
+): Promise<{ error: { message: string } | null }> {
+  const trimmed = packageNumber.trim();
+  const asInt = Number.parseInt(trimmed, 10);
+  if (!Number.isFinite(asInt) || String(asInt) !== trimmed) {
+    return { error: { message: `無效的包裹編號：${packageNumber}` } };
+  }
+  const { error } = await supabase
+    .from("packages")
+    .update({ is_settled: true })
+    .eq("number", asInt);
+  if (error) {
+    return { error: { message: error.message } };
+  }
+  return { error: null };
+}
+
 /** All `packages.number` as strings, ascending (for dropdowns / filters). */
 export async function fetchPackageNumbersFromDb(): Promise<{
   data: string[] | null;

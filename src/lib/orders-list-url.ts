@@ -10,7 +10,7 @@ export const ORDERS_PAYMENT_OPTIONS = [
 export const ORDERS_PRODUCT_OPTIONS = [
   "全部",
   "未購買",
-  "已購賣",
+  "已購買",
   "到虹家",
   "集運回台",
   "到台灣",

@@ -12,7 +12,6 @@ import {
 type DeleteOrderDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  orderId: string | null;
   error: string | null;
   isSubmitting: boolean;
   onConfirm: () => void;
@@ -21,7 +20,6 @@ type DeleteOrderDialogProps = {
 export function DeleteOrderDialog({
   open,
   onOpenChange,
-  orderId,
   error,
   isSubmitting,
   onConfirm,
@@ -31,9 +29,7 @@ export function DeleteOrderDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>刪除訂單</DialogTitle>
-          <DialogDescription>
-            確定要刪除訂單 {orderId ?? ""} 嗎？此操作無法復原。
-          </DialogDescription>
+          <DialogDescription>確定要刪除此筆訂單嗎？此操作無法復原。</DialogDescription>
         </DialogHeader>
         {error && (
           <p className="text-sm text-destructive" role="alert">

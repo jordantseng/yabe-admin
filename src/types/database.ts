@@ -5,6 +5,10 @@
  * - 20260429154500_drop_orders_revenue.sql
  * - 20260429160000_add_shipping_fees.sql
  * - 20260429193000_add_order_notes.sql
+ * - 20260429200000_add_order_recipient_and_address.sql
+ * - 20260429201500_add_order_phone_and_remove_duplicate_address.sql
+ * - 20260429213500_add_order_quantity.sql
+ * - 20260429220500_add_package_settled_flag.sql
  */
 
 export type PackageStatus =
@@ -18,6 +22,7 @@ export type PackageRow = {
   id: string;
   number: number;
   status: PackageStatus;
+  is_settled: boolean;
   notes: string | null;
   international_shipping_fee: number;
   arrived_at_tw: string | null;
@@ -41,7 +46,7 @@ export type OrderPaymentStatus = "未收款" | "已收款" | "已入帳";
 
 export type OrderProductStatus =
   | "未購買"
-  | "已購賣"
+  | "已購買"
   | "到虹家"
   | "集運回台"
   | "到台灣"
@@ -51,9 +56,12 @@ export type OrderRow = {
   id: string;
   item: string;
   purchase_date: string;
+  recipient_name: string | null;
+  recipient_phone: string | null;
   buyer: string;
   payer: OrderPayer;
   cost: number;
+  quantity: number;
   price: number;
   domestic_shipping_fee: number;
   notes: string | null;

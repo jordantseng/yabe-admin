@@ -9,6 +9,7 @@ create table if not exists public.orders (
   buyer text not null,
   payer text not null check (payer in ('虹', '藍')),
   cost numeric(12, 2) not null default 0,
+  quantity integer not null default 1 check (quantity >= 1),
   price numeric(12, 2) not null default 0,
   revenue numeric(12, 2) generated always as (price - cost) stored,
   payment_status text not null
@@ -17,7 +18,7 @@ create table if not exists public.orders (
     check (
       product_status in (
         '未購買',
-        '已購賣',
+        '已購買',
         '到虹家',
         '集運回台',
         '到台灣',
@@ -53,22 +54,26 @@ create trigger orders_set_updated_at
 alter table public.orders enable row level security;
 
 -- Adjust policies to your auth model. Example: signed-in users only.
+drop policy if exists "orders_select_authenticated" on public.orders;
 create policy "orders_select_authenticated"
   on public.orders for select
   to authenticated
   using (true);
 
+drop policy if exists "orders_insert_authenticated" on public.orders;
 create policy "orders_insert_authenticated"
   on public.orders for insert
   to authenticated
   with check (true);
 
+drop policy if exists "orders_update_authenticated" on public.orders;
 create policy "orders_update_authenticated"
   on public.orders for update
   to authenticated
   using (true)
   with check (true);
 
+drop policy if exists "orders_delete_authenticated" on public.orders;
 create policy "orders_delete_authenticated"
   on public.orders for delete
   to authenticated

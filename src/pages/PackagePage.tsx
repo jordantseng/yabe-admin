@@ -6,7 +6,7 @@ import {
   useState,
 } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { EyeIcon, FilterIcon, Trash2Icon } from "lucide-react";
+import { EyeIcon, FilterIcon, XIcon } from "lucide-react";
 import { useQueryStates } from "nuqs";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -44,8 +44,8 @@ import {
 } from "@/components/ui/table";
 import {
   createPackage,
-  deletePackageByNumber,
   fetchPackageNumbersFromDb,
+  settlePackageByNumber,
   updatePackageInternationalShippingFeeByNumber,
 } from "@/lib/packages";
 import { packagesListSearchParams } from "@/lib/packages-list-url";
@@ -68,10 +68,14 @@ export type PackageTableRow = {
   id: string;
   packageNumber: string;
   packageNotes: string;
+  packageSettled: boolean;
   item: string;
+  quantity: string;
   orderNotes: string;
   purchaseDate: string;
   buyer: string;
+  recipientName: string;
+  phone: string;
   address: string;
   cost: string;
   price: string;
@@ -108,16 +112,20 @@ function displayPackageNumber(row: OrderWithPackageNumber): string {
 
 function orderToPackageTableRow(row: OrderWithPackageNumber): PackageTableRow {
   const packageRel = row.packages as
-    | { international_shipping_fee?: number; notes?: string | null }
+    | { international_shipping_fee?: number; notes?: string | null; is_settled?: boolean }
     | null;
   return {
     id: row.id,
     packageNumber: displayPackageNumber(row),
     packageNotes: packageRel?.notes?.trim() ?? "",
+    packageSettled: packageRel?.is_settled === true,
     item: row.item,
+    quantity: String(row.quantity),
     orderNotes: row.notes ?? "",
     purchaseDate: purchaseDateSlice(row.purchase_date),
     buyer: row.buyer,
+    recipientName: row.recipient_name ?? "",
+    phone: row.recipient_phone ?? "",
     address: row.domestic_delivery_address ?? "",
     cost: String(row.cost),
     price: String(row.price),
@@ -175,13 +183,9 @@ function PackagePage() {
   const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
   const [draftFilterPackageNumber, setDraftFilterPackageNumber] =
     useState<string>("全部");
+  const [draftFilterProductStatus, setDraftFilterProductStatus] =
+    useState<string>("全部");
   const [rowFieldError, setRowFieldError] = useState<string | null>(null);
-  const [isDeletePackageDialogOpen, setIsDeletePackageDialogOpen] =
-    useState(false);
-  const [packageToDelete, setPackageToDelete] = useState<string | null>(null);
-  const [deletePackageError, setDeletePackageError] = useState<string | null>(
-    null
-  );
   const [isEditPackageFeeDialogOpen, setIsEditPackageFeeDialogOpen] =
     useState(false);
   const [packageToEditFee, setPackageToEditFee] = useState<string | null>(null);
@@ -189,13 +193,18 @@ function PackagePage() {
   const [editPackageFeeError, setEditPackageFeeError] = useState<string | null>(
     null,
   );
+  const [settlePackageError, setSettlePackageError] = useState<string | null>(null);
+  const [dismissedRowsError, setDismissedRowsError] = useState<string | null>(null);
+  const [isSettlePackageDialogOpen, setIsSettlePackageDialogOpen] = useState(false);
+  const [packageToSettle, setPackageToSettle] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const rowsQuery = useQuery({
-    queryKey: [PACKAGE_ROWS_QUERY_KEY, listUrl.q, listUrl.pkg, listUrl.page],
+    queryKey: [PACKAGE_ROWS_QUERY_KEY, listUrl.q, listUrl.pkg, listUrl.product, listUrl.page],
     queryFn: async () => {
       const res = await fetchOrdersForPackagePage({
         itemSearch: listUrl.q,
         packageFilter: listUrl.pkg,
+        productStatus: listUrl.product,
         page: listUrl.page,
         pageSize: PACKAGE_PAGE_SIZE,
       });
@@ -237,22 +246,19 @@ function PackagePage() {
     },
     onSuccess: () => invalidatePackageRows(),
   });
-  const deletePackageMutation = useMutation({
-    mutationFn: async (pkg: string) => {
-      const { error } = await deletePackageByNumber(pkg);
-      if (error) throw new Error(error.message);
-    },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: PACKAGE_NUMBERS_QUERY_KEY });
-      invalidatePackageRows();
-    },
-  });
   const editPackageFeeMutation = useMutation({
     mutationFn: async (args: { pkg: string; fee: number }) => {
       const { error } = await updatePackageInternationalShippingFeeByNumber(
         args.pkg,
         args.fee,
       );
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => invalidatePackageRows(),
+  });
+  const settlePackageMutation = useMutation({
+    mutationFn: async (pkg: string) => {
+      const { error } = await settlePackageByNumber(pkg);
       if (error) throw new Error(error.message);
     },
     onSuccess: () => invalidatePackageRows(),
@@ -274,7 +280,9 @@ function PackagePage() {
     }
   }, [safeCurrentPage, listUrl.page, setListUrl]);
 
-  const patchListUrl = (patch: Partial<{ q: string; pkg: string; page: number }>) => {
+  const patchListUrl = (
+    patch: Partial<{ q: string; pkg: string; product: string; page: number }>
+  ) => {
     void setListUrl(patch);
   };
   const applySearch = () => {
@@ -333,11 +341,7 @@ function PackagePage() {
       totalInternationalShippingFee += toNumber(row.internationalShippingFee);
     }
 
-    const totalProfit =
-      totalPrice -
-      totalCost -
-      totalInternationalShippingFee -
-      totalDomesticShippingFee;
+    const totalProfit = totalPrice - totalCost - totalInternationalShippingFee;
 
     return {
       totalPrice,
@@ -349,6 +353,10 @@ function PackagePage() {
   }, [rows]);
 
   const handlePackageNumberChange = (id: string, value: string | null) => {
+    const target = rows.find((row) => row.id === id);
+    if (target?.packageSettled) {
+      return;
+    }
     if (value) {
       setRowFieldError(null);
       void (async () => {
@@ -365,9 +373,14 @@ function PackagePage() {
   };
 
   const handleProductStatusChange = (id: string, value: string | null) => {
+    const target = rows.find((row) => row.id === id);
+    if (target?.packageSettled || target?.productStatus === "已出貨") {
+      setRowFieldError("商品狀態已出貨後不可再修改");
+      return;
+    }
     if (
       value === "未購買" ||
-      value === "已購賣" ||
+      value === "已購買" ||
       value === "到虹家" ||
       value === "集運回台" ||
       value === "到台灣" ||
@@ -410,39 +423,49 @@ function PackagePage() {
     setIsFilterPopoverOpen(open);
     if (open) {
       setDraftFilterPackageNumber(listUrl.pkg);
+      setDraftFilterProductStatus(listUrl.product);
     }
   };
 
   const applyPackageFilter = () => {
-    void setListUrl({ pkg: draftFilterPackageNumber, page: 1 });
+    void setListUrl({
+      pkg: draftFilterPackageNumber,
+      product: draftFilterProductStatus,
+      page: 1,
+    });
     setIsFilterPopoverOpen(false);
   };
 
-  const openDeletePackageDialog = (pkg: string) => {
-    setDeletePackageError(null);
-    setPackageToDelete(pkg);
-    setIsDeletePackageDialogOpen(true);
+  const settlePackage = async (pkg: string): Promise<boolean> => {
+    setSettlePackageError(null);
+    try {
+      await settlePackageMutation.mutateAsync(pkg);
+      return true;
+    } catch (error) {
+      setSettlePackageError((error as Error).message);
+      return false;
+    }
+  };
+  const openSettlePackageDialog = (pkg: string) => {
+    setSettlePackageError(null);
+    setPackageToSettle(pkg);
+    setIsSettlePackageDialogOpen(true);
+  };
+  const confirmSettlePackage = async () => {
+    if (!packageToSettle) return;
+    const ok = await settlePackage(packageToSettle);
+    if (ok) {
+      setIsSettlePackageDialogOpen(false);
+      setPackageToSettle(null);
+    }
   };
 
-  const confirmDeletePackage = async () => {
-    if (!packageToDelete) {
-      return;
-    }
-    setDeletePackageError(null);
-    try {
-      await deletePackageMutation.mutateAsync(packageToDelete);
-    } catch (error) {
-      setDeletePackageError((error as Error).message);
-      return;
-    }
-    if (listUrl.pkg === packageToDelete) {
-      void setListUrl({ pkg: "全部" });
-    }
-    setPackageToDelete(null);
-    setIsDeletePackageDialogOpen(false);
-  };
 
   const openEditPackageFeeDialog = (pkg: string, currentFee: string) => {
+    const group = groupedRows.find((g) => g.label === pkg);
+    if (group?.rows[0]?.packageSettled) {
+      return;
+    }
     setEditPackageFeeError(null);
     setPackageToEditFee(pkg);
     setEditPackageFeeValue(currentFee);
@@ -497,9 +520,22 @@ function PackagePage() {
                 </DialogDescription>
               </DialogHeader>
               {createPackageError && (
-                <p className="text-sm text-destructive" role="alert">
-                  {createPackageError}
-                </p>
+                <div
+                  className="flex items-start justify-between gap-2 text-sm text-destructive"
+                  role="alert"
+                >
+                  <p>{createPackageError}</p>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-destructive"
+                    onClick={() => setCreatePackageError(null)}
+                    aria-label="關閉錯誤訊息"
+                  >
+                    <XIcon className="h-4 w-4" />
+                  </Button>
+                </div>
               )}
               <div className="py-2">
                 <div className="space-y-1">
@@ -604,6 +640,30 @@ function PackagePage() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-1">
+                <p className="text-sm font-medium">商品狀態</p>
+                <Select
+                  value={draftFilterProductStatus}
+                  onValueChange={(value) => {
+                    if (value) {
+                      setDraftFilterProductStatus(value);
+                    }
+                  }}
+                >
+                  <SelectTrigger aria-label="篩選商品狀態">
+                    <SelectValue placeholder="商品狀態" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="全部">全部商品狀態</SelectItem>
+                    <SelectItem value="未購買">未購買</SelectItem>
+                    <SelectItem value="已購買">已購買</SelectItem>
+                    <SelectItem value="到虹家">到虹家</SelectItem>
+                    <SelectItem value="集運回台">集運回台</SelectItem>
+                    <SelectItem value="到台灣">到台灣</SelectItem>
+                    <SelectItem value="已出貨">已出貨</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <Button
                 type="button"
                 className="w-full"
@@ -642,17 +702,73 @@ function PackagePage() {
             <span aria-hidden="true">×</span>
           </button>
         )}
+        {listUrl.product !== "全部" && (
+          <button
+            type="button"
+            onClick={() => {
+              patchListUrl({ product: "全部", page: 1 });
+            }}
+            className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-3 py-1 text-xs"
+          >
+            商品狀態: {listUrl.product}
+            <span aria-hidden="true">×</span>
+          </button>
+        )}
       </div>
 
-      {rowsError && (
-        <p className="mb-4 text-sm text-destructive" role="alert">
-          {rowsError}
-        </p>
+      {rowsError && dismissedRowsError !== rowsError && (
+        <div
+          className="mb-4 flex items-start justify-between gap-2 text-sm text-destructive"
+          role="alert"
+        >
+          <p>{rowsError}</p>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-destructive"
+            onClick={() => setDismissedRowsError(rowsError)}
+            aria-label="關閉錯誤訊息"
+          >
+            <XIcon className="h-4 w-4" />
+          </Button>
+        </div>
       )}
       {rowFieldError && (
-        <p className="mb-4 text-sm text-destructive" role="alert">
-          商品狀態更新失敗：{rowFieldError}
-        </p>
+        <div
+          className="mb-4 flex items-start justify-between gap-2 text-sm text-destructive"
+          role="alert"
+        >
+          <p>商品狀態更新失敗：{rowFieldError}</p>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-destructive"
+            onClick={() => setRowFieldError(null)}
+            aria-label="關閉錯誤訊息"
+          >
+            <XIcon className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
+      {settlePackageError && (
+        <div
+          className="mb-4 flex items-start justify-between gap-2 text-sm text-destructive"
+          role="alert"
+        >
+          <p>包裹結清失敗：{settlePackageError}</p>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-destructive"
+            onClick={() => setSettlePackageError(null)}
+            aria-label="關閉錯誤訊息"
+          >
+            <XIcon className="h-4 w-4" />
+          </Button>
+        </div>
       )}
 
       <div className="overflow-x-auto">
@@ -661,15 +777,18 @@ function PackagePage() {
             <TableRow>
               <TableHead>包裹編號</TableHead>
               <TableHead className="min-w-48">品項</TableHead>
-              <TableHead className="min-w-48">備註</TableHead>
+              <TableHead>數量</TableHead>
               <TableHead>購買日期</TableHead>
               <TableHead>購買人</TableHead>
-              <TableHead className="min-w-48">地址</TableHead>
+              <TableHead>收件人</TableHead>
+              <TableHead>電話</TableHead>
+              <TableHead className="min-w-48">收件地址</TableHead>
               <TableHead className="text-right">成本</TableHead>
               <TableHead className="text-right">售價</TableHead>
-              <TableHead className="text-right">店到店運費</TableHead>
               <TableHead className="text-right">收益</TableHead>
+              <TableHead className="text-right">運費</TableHead>
               <TableHead>商品狀態</TableHead>
+              <TableHead className="min-w-48">備註</TableHead>
               <TableHead className="w-[88px]">詳細</TableHead>
             </TableRow>
           </TableHeader>
@@ -687,10 +806,19 @@ function PackagePage() {
                     <Skeleton className="h-4 w-40" />
                   </TableCell>
                   <TableCell>
+                    <Skeleton className="h-4 w-10" />
+                  </TableCell>
+                  <TableCell>
                     <Skeleton className="h-4 w-24" />
                   </TableCell>
                   <TableCell>
                     <Skeleton className="h-4 w-20" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-20" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-24" />
                   </TableCell>
                   <TableCell>
                     <Skeleton className="h-4 w-40" />
@@ -711,6 +839,9 @@ function PackagePage() {
                     <Skeleton className="h-8 w-28" />
                   </TableCell>
                   <TableCell>
+                    <Skeleton className="h-4 w-40" />
+                  </TableCell>
+                  <TableCell>
                     <Skeleton className="h-8 w-8 rounded-md" />
                   </TableCell>
                 </TableRow>
@@ -718,7 +849,7 @@ function PackagePage() {
             ) : rowsError ? (
               <TableRow>
                 <TableCell
-                  colSpan={12}
+                  colSpan={15}
                   className="h-24 text-center text-sm text-muted-foreground"
                 >
                   無法載入列表，請見上方錯誤說明。
@@ -727,7 +858,7 @@ function PackagePage() {
             ) : rows.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={12}
+                  colSpan={15}
                   className="h-24 text-center text-sm text-muted-foreground"
                 >
                   {listUrl.q.trim() !== ""
@@ -742,15 +873,17 @@ function PackagePage() {
                 <Fragment key={group.label}>
                   <TableRow className="bg-muted/60 hover:bg-muted/60">
                     <TableCell
-                      colSpan={11}
+                      colSpan={14}
                       className="py-3 text-sm font-semibold tracking-tight"
                     >
                       {group.label === "未指定"
                         ? "未指派包裹"
                         : `包裹${group.label}`}
-                      <span className="ml-2 font-normal text-muted-foreground">
-                        （{group.rows.length} 筆訂單）
-                      </span>
+                      {group.rows[0]?.packageSettled === true && (
+                        <span className="ml-2 font-normal text-muted-foreground">
+                          （已結清）
+                        </span>
+                      )}
                       {group.label !== "未指定" && (
                         <span className="ml-3 font-normal text-muted-foreground">
                           國際運費: {group.rows[0]?.internationalShippingFee ?? "0"}
@@ -758,13 +891,32 @@ function PackagePage() {
                       )}
                       {group.label !== "未指定" &&
                         (group.rows[0]?.packageNotes ?? "") !== "" && (
-                          <span className="ml-3 font-normal text-muted-foreground">
+                          <span
+                            className="ml-3 inline-block max-w-[24rem] truncate align-bottom font-normal text-muted-foreground"
+                            title={group.rows[0]?.packageNotes ?? ""}
+                          >
                             備註: {group.rows[0]?.packageNotes}
                           </span>
                         )}
                     </TableCell>
                     <TableCell className="py-3 space-x-2">
-                      {group.label !== "未指定" && (
+                      {group.label !== "未指定" &&
+                        group.rows[0]?.packageSettled !== true && (
+                        <Button
+                          type="button"
+                          variant="default"
+                          className="h-8 px-3"
+                          disabled={
+                            !group.rows.every((r) => r.productStatus === "已出貨") ||
+                            settlePackageMutation.isPending
+                          }
+                          onClick={() => openSettlePackageDialog(group.label)}
+                        >
+                          結清包裹
+                        </Button>
+                        )}
+                      {group.label !== "未指定" &&
+                        group.rows[0]?.packageSettled !== true && (
                         <Button
                           type="button"
                           variant="outline"
@@ -778,17 +930,7 @@ function PackagePage() {
                         >
                           修改運費
                         </Button>
-                      )}
-                      {group.label !== "未指定" && (
-                        <button
-                          type="button"
-                          aria-label={`刪除包裹編號 ${group.label}`}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-input text-destructive hover:bg-destructive/10"
-                          onClick={() => openDeletePackageDialog(group.label)}
-                        >
-                          <Trash2Icon className="h-4 w-4" />
-                        </button>
-                      )}
+                        )}
                     </TableCell>
                   </TableRow>
                   {group.rows.map((row) => (
@@ -796,6 +938,7 @@ function PackagePage() {
                       <TableCell>
                         <Select
                           value={row.packageNumber}
+                          disabled={row.packageSettled}
                           onValueChange={(value) =>
                             handlePackageNumberChange(row.id, value)
                           }
@@ -815,17 +958,29 @@ function PackagePage() {
                           </SelectContent>
                         </Select>
                       </TableCell>
-                      <TableCell className="max-w-56 text-sm text-muted-foreground">
+                      <TableCell
+                        className="max-w-56 truncate text-sm text-muted-foreground"
+                        title={row.item}
+                      >
                         {row.item}
                       </TableCell>
-                      <TableCell className="max-w-56 text-sm text-muted-foreground">
-                        {row.orderNotes}
-                      </TableCell>
+                      <TableCell>{row.quantity}</TableCell>
                       <TableCell className="tabular-nums">
                         {row.purchaseDate}
                       </TableCell>
-                      <TableCell>{row.buyer}</TableCell>
-                      <TableCell className="max-w-[20rem] text-sm text-muted-foreground">
+                      <TableCell className="max-w-32 truncate" title={row.buyer}>
+                        {row.buyer}
+                      </TableCell>
+                      <TableCell className="max-w-32 truncate" title={row.recipientName}>
+                        {row.recipientName}
+                      </TableCell>
+                      <TableCell className="max-w-36 truncate" title={row.phone}>
+                        {row.phone}
+                      </TableCell>
+                      <TableCell
+                        className="max-w-[20rem] truncate text-sm text-muted-foreground"
+                        title={row.address}
+                      >
                         {row.address}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
@@ -835,14 +990,15 @@ function PackagePage() {
                         {row.price}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {row.domesticShippingFee}
+                        {row.revenue}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {row.revenue}
+                        {row.domesticShippingFee}
                       </TableCell>
                       <TableCell>
                         <Select
                           value={row.productStatus}
+                          disabled={row.packageSettled || row.productStatus === "已出貨"}
                           onValueChange={(value) =>
                             handleProductStatusChange(row.id, value)
                           }
@@ -855,13 +1011,19 @@ function PackagePage() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="未購買">未購買</SelectItem>
-                            <SelectItem value="已購賣">已購賣</SelectItem>
+                            <SelectItem value="已購買">已購買</SelectItem>
                             <SelectItem value="到虹家">到虹家</SelectItem>
                             <SelectItem value="集運回台">集運回台</SelectItem>
                             <SelectItem value="到台灣">到台灣</SelectItem>
                             <SelectItem value="已出貨">已出貨</SelectItem>
                           </SelectContent>
                         </Select>
+                      </TableCell>
+                      <TableCell
+                        className="max-w-56 truncate text-sm text-muted-foreground"
+                        title={row.orderNotes}
+                      >
+                        {row.orderNotes}
                       </TableCell>
                       <TableCell className="space-x-2">
                         <Link
@@ -893,7 +1055,8 @@ function PackagePage() {
           ) : (
             <>
               <p>
-                總售價: <span className="font-semibold">{totals.totalPrice.toLocaleString()}</span>
+                總營業額:{" "}
+                <span className="font-semibold">{totals.totalPrice.toLocaleString()}</span>
               </p>
               <p>
                 總成本: <span className="font-semibold">{totals.totalCost.toLocaleString()}</span>
@@ -905,7 +1068,7 @@ function PackagePage() {
                 </span>
               </p>
               <p>
-                總店到店運費:{" "}
+                總運費:{" "}
                 <span className="font-semibold">
                   {totals.totalDomesticShippingFee.toLocaleString()}
                 </span>
@@ -950,37 +1113,47 @@ function PackagePage() {
         </div>
       </div>
       <Dialog
-        open={isDeletePackageDialogOpen}
+        open={isSettlePackageDialogOpen}
         onOpenChange={(open) => {
-          setIsDeletePackageDialogOpen(open);
+          setIsSettlePackageDialogOpen(open);
           if (!open) {
-            setPackageToDelete(null);
-            setDeletePackageError(null);
+            setPackageToSettle(null);
           }
         }}
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>確認刪除包裹</DialogTitle>
+            <DialogTitle>確認結清包裹</DialogTitle>
             <DialogDescription>
-              確定要刪除包裹編號 {packageToDelete ?? "-"}{" "}
-              嗎？已指派此包裹的訂單會改為未指派。
+              確定要將包裹編號 {packageToSettle ?? "-"} 標記為已結清嗎？
             </DialogDescription>
           </DialogHeader>
-          {deletePackageError && (
-            <p className="text-sm text-destructive" role="alert">
-              {deletePackageError}
-            </p>
+          {settlePackageError && (
+            <div
+              className="flex items-start justify-between gap-2 text-sm text-destructive"
+              role="alert"
+            >
+              <p>{settlePackageError}</p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-destructive"
+                onClick={() => setSettlePackageError(null)}
+                aria-label="關閉錯誤訊息"
+              >
+                <XIcon className="h-4 w-4" />
+              </Button>
+            </div>
           )}
           <DialogFooter>
             <DialogClose render={<Button variant="outline">取消</Button>} />
             <Button
               type="button"
-              variant="destructive"
-              onClick={() => void confirmDeletePackage()}
-              disabled={deletePackageMutation.isPending}
+              onClick={() => void confirmSettlePackage()}
+              disabled={settlePackageMutation.isPending}
             >
-              {deletePackageMutation.isPending ? "刪除中…" : "刪除包裹"}
+              {settlePackageMutation.isPending ? "結清中…" : "確認結清"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1004,9 +1177,22 @@ function PackagePage() {
             </DialogDescription>
           </DialogHeader>
           {editPackageFeeError && (
-            <p className="text-sm text-destructive" role="alert">
-              {editPackageFeeError}
-            </p>
+            <div
+              className="flex items-start justify-between gap-2 text-sm text-destructive"
+              role="alert"
+            >
+              <p>{editPackageFeeError}</p>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2 text-destructive"
+                onClick={() => setEditPackageFeeError(null)}
+                aria-label="關閉錯誤訊息"
+              >
+                <XIcon className="h-4 w-4" />
+              </Button>
+            </div>
           )}
           <Input
             type="number"

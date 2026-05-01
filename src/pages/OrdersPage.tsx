@@ -6,6 +6,7 @@ import {
   FilterIcon,
   FolderInputIcon,
   Trash2Icon,
+  XIcon,
 } from "lucide-react";
 import { useQueryStates } from "nuqs";
 import { Link } from "react-router-dom";
@@ -68,6 +69,9 @@ function createEmptyNewOrderDraft(): NewOrderDraft {
     item: "",
     notes: "",
     purchaseDate: new Date().toISOString().slice(0, 10),
+    recipientName: "",
+    phone: "",
+    quantity: "1",
     buyer: "",
     domesticDeliveryAddress: "",
     payer: "虹",
@@ -98,6 +102,9 @@ function OrdersPage() {
   const [listFieldError, setListFieldError] = useState<string | null>(null);
   const [createOrderError, setCreateOrderError] = useState<string | null>(null);
   const [deleteOrderError, setDeleteOrderError] = useState<string | null>(null);
+  const [dismissedOrdersError, setDismissedOrdersError] = useState<string | null>(
+    null
+  );
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
   const [isMoveToPopoverOpen, setIsMoveToPopoverOpen] = useState(false);
   const [bulkPackageNumber, setBulkPackageNumber] = useState("未指定");
@@ -223,7 +230,12 @@ function OrdersPage() {
     await persistFieldMutation.mutateAsync({ orderId, patch });
   };
 
-  const handlePackageNumberChange = (orderId: string, value: string | null) => {
+  const handlePackageNumberChange = (
+    orderId: string,
+    value: string | null,
+    isLocked: boolean
+  ) => {
+    if (isLocked) return;
     if (value) {
       void persistListPatch(orderId, { packageNumber: value });
     }
@@ -272,7 +284,19 @@ function OrdersPage() {
   const handleCreateOrder = async () => {
     const item = newOrder.item.trim();
     const buyer = newOrder.buyer.trim();
-    if (!item || !buyer) {
+    const recipientName = newOrder.recipientName.trim();
+    const phone = newOrder.phone.trim();
+    const quantityNumber = Number.parseInt(newOrder.quantity, 10);
+    const domesticDeliveryAddress = newOrder.domesticDeliveryAddress.trim();
+    if (
+      !item ||
+      !buyer ||
+      !recipientName ||
+      !phone ||
+      !domesticDeliveryAddress ||
+      !Number.isFinite(quantityNumber) ||
+      quantityNumber < 1
+    ) {
       return;
     }
 
@@ -287,8 +311,11 @@ function OrdersPage() {
       item,
       notes: newOrder.notes,
       purchaseDate: newOrder.purchaseDate,
+      recipientName,
+      phone,
+      quantity: quantityNumber,
       buyer,
-      domesticDeliveryAddress: newOrder.domesticDeliveryAddress,
+      domesticDeliveryAddress,
       payer: newOrder.payer,
       cost: Number.isNaN(costNumber) ? 0 : costNumber,
       price: Number.isNaN(priceNumber) ? 0 : priceNumber,
@@ -362,8 +389,17 @@ function OrdersPage() {
       return;
     }
     setListFieldError(null);
+    const orderById = new Map(orders.map((order) => [order.id, order]));
+    const lockedIds = ids.filter(
+      (id) => orderById.get(id)?.productStatus === "已出貨"
+    );
+    const updatableIds = ids.filter((id) => !lockedIds.includes(id));
+    if (updatableIds.length === 0) {
+      setListFieldError("已出貨訂單不能透過批次指定包裹編號");
+      return;
+    }
     const results = await Promise.all(
-      ids.map((id) =>
+      updatableIds.map((id) =>
         updateOrderFields(id, { packageNumber: bulkPackageNumber })
       )
     );
@@ -372,20 +408,37 @@ function OrdersPage() {
       setListFieldError(failed.error.message);
       return;
     }
-    setSelectedOrderIds([]);
+    if (lockedIds.length > 0) {
+      setListFieldError("部分已出貨訂單未變更包裹編號（已自動略過）");
+    }
+    setSelectedOrderIds(lockedIds);
     setIsMoveToPopoverOpen(false);
     invalidateOrdersData();
   };
 
   return (
     <main style={{ padding: "2rem", fontFamily: "system-ui, sans-serif" }}>
-      {ordersError && (
+      {ordersError && dismissedOrdersError !== ordersError && (
         <div
           className="mb-4 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
           role="alert"
         >
-          <p className="font-medium">無法載入訂單</p>
-          <p className="mt-1 text-destructive/90">{ordersError}</p>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="font-medium">無法載入訂單</p>
+              <p className="mt-1 text-destructive/90">{ordersError}</p>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-destructive"
+              onClick={() => setDismissedOrdersError(ordersError)}
+              aria-label="關閉錯誤訊息"
+            >
+              <XIcon className="h-4 w-4" />
+            </Button>
+          </div>
           <Button
             type="button"
             variant="outline"
@@ -402,8 +455,22 @@ function OrdersPage() {
           className="mb-4 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
           role="alert"
         >
-          <p className="font-medium">更新失敗</p>
-          <p className="mt-1 text-destructive/90">{listFieldError}</p>
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="font-medium">更新失敗</p>
+              <p className="mt-1 text-destructive/90">{listFieldError}</p>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-destructive"
+              onClick={() => setListFieldError(null)}
+              aria-label="關閉錯誤訊息"
+            >
+              <XIcon className="h-4 w-4" />
+            </Button>
+          </div>
         </div>
       )}
       <div className="mb-4 flex items-center justify-between gap-2">
@@ -519,7 +586,7 @@ function OrdersPage() {
                     <SelectContent>
                       <SelectItem value="全部">全部商品狀態</SelectItem>
                       <SelectItem value="未購買">未購買</SelectItem>
-                      <SelectItem value="已購賣">已購賣</SelectItem>
+                      <SelectItem value="已購買">已購買</SelectItem>
                       <SelectItem value="到虹家">到虹家</SelectItem>
                       <SelectItem value="集運回台">集運回台</SelectItem>
                       <SelectItem value="到台灣">到台灣</SelectItem>
@@ -670,9 +737,8 @@ function OrdersPage() {
                   disabled={ordersLoading}
                 />
               </TableHead>
-              <TableHead className="w-[96px] max-w-[96px]">訂單編號</TableHead>
               <TableHead>品項</TableHead>
-              <TableHead>備註</TableHead>
+              <TableHead>數量</TableHead>
               <TableHead>
                 <button
                   type="button"
@@ -694,13 +760,14 @@ function OrdersPage() {
               </TableHead>
               <TableHead>購買人</TableHead>
               <TableHead>付款人</TableHead>
-              <TableHead>成本</TableHead>
               <TableHead>售價</TableHead>
-              <TableHead>店到店運費</TableHead>
+              <TableHead>成本</TableHead>
               <TableHead>收益</TableHead>
+              <TableHead>運費</TableHead>
               <TableHead>收款狀態</TableHead>
               <TableHead>商品狀態</TableHead>
               <TableHead>包裹編號</TableHead>
+              <TableHead>備註</TableHead>
               <TableHead>詳細</TableHead>
             </TableRow>
           </TableHeader>
@@ -711,14 +778,11 @@ function OrdersPage() {
                   <TableCell>
                     <Skeleton className="h-4 w-4 rounded-sm" />
                   </TableCell>
-                  <TableCell className="w-[96px] max-w-[96px]">
-                    <Skeleton className="h-4 w-20" />
-                  </TableCell>
                   <TableCell>
                     <Skeleton className="h-4 w-44" />
                   </TableCell>
                   <TableCell>
-                    <Skeleton className="h-4 w-36" />
+                    <Skeleton className="h-4 w-10" />
                   </TableCell>
                   <TableCell>
                     <Skeleton className="h-4 w-24" />
@@ -751,6 +815,9 @@ function OrdersPage() {
                     <Skeleton className="h-8 w-32" />
                   </TableCell>
                   <TableCell>
+                    <Skeleton className="h-4 w-36" />
+                  </TableCell>
+                  <TableCell>
                     <div className="flex gap-2">
                       <Skeleton className="h-8 w-8 rounded-md" />
                       <Skeleton className="h-8 w-8 rounded-md" />
@@ -759,7 +826,9 @@ function OrdersPage() {
                 </TableRow>
               ))}
             {!ordersLoading &&
-              orders.map((order) => (
+              orders.map((order) => {
+                const isLocked = order.productStatus === "已出貨";
+                return (
                 <TableRow key={order.id}>
                   <TableCell>
                     <input
@@ -771,21 +840,16 @@ function OrdersPage() {
                       aria-label={`選擇訂單 ${order.id}`}
                     />
                   </TableCell>
-                  <TableCell className="w-[96px] max-w-[96px]">
-                    <div className="w-[96px] truncate" title={order.id}>
-                      {order.id}
-                    </div>
-                  </TableCell>
                   <TableCell>{order.item}</TableCell>
-                  <TableCell className="max-w-52 truncate" title={order.notes}>
-                    {order.notes}
-                  </TableCell>
+                  <TableCell>{order.quantity}</TableCell>
                   <TableCell>{order.purchaseDate}</TableCell>
                   <TableCell>{order.buyer}</TableCell>
                   <TableCell>
                     <Select
+                      disabled={isLocked}
                       value={order.payer}
                       onValueChange={(value) => {
+                        if (isLocked) return;
                         if (value === "虹" || value === "藍") {
                           void persistListPatch(order.id, { payer: value });
                         }
@@ -800,14 +864,16 @@ function OrdersPage() {
                       </SelectContent>
                     </Select>
                   </TableCell>
-                  <TableCell>{order.cost}</TableCell>
                   <TableCell>{order.price}</TableCell>
-                  <TableCell>{order.domesticShippingFee}</TableCell>
+                  <TableCell>{order.cost}</TableCell>
                   <TableCell>{order.revenue}</TableCell>
+                  <TableCell>{order.domesticShippingFee}</TableCell>
                   <TableCell>
                     <Select
+                      disabled={isLocked}
                       value={order.paymentStatus}
                       onValueChange={(value) => {
+                        if (isLocked) return;
                         if (
                           value === "未收款" ||
                           value === "已收款" ||
@@ -842,11 +908,20 @@ function OrdersPage() {
                   </TableCell>
                   <TableCell>
                     <Select
+                      disabled={order.productStatus === "已出貨"}
                       value={order.productStatus}
                       onValueChange={(value) => {
+                        if (order.productStatus === "已出貨") {
+                          setListFieldError("商品狀態已出貨後不可再修改");
+                          return;
+                        }
+                        if (value === "已出貨" && order.paymentStatus !== "已入帳") {
+                          setListFieldError("收款狀態尚未入帳，不能將商品狀態改為已出貨");
+                          return;
+                        }
                         if (
                           value === "未購買" ||
-                          value === "已購賣" ||
+                          value === "已購買" ||
                           value === "到虹家" ||
                           value === "集運回台" ||
                           value === "到台灣" ||
@@ -863,7 +938,7 @@ function OrdersPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="未購買">未購買</SelectItem>
-                        <SelectItem value="已購賣">已購賣</SelectItem>
+                        <SelectItem value="已購買">已購買</SelectItem>
                         <SelectItem value="到虹家">到虹家</SelectItem>
                         <SelectItem value="集運回台">集運回台</SelectItem>
                         <SelectItem value="到台灣">到台灣</SelectItem>
@@ -873,9 +948,10 @@ function OrdersPage() {
                   </TableCell>
                   <TableCell>
                     <Select
+                      disabled={isLocked}
                       value={order.packageNumber}
                       onValueChange={(value) =>
-                        handlePackageNumberChange(order.id, value)
+                        handlePackageNumberChange(order.id, value, isLocked)
                       }
                     >
                       <SelectTrigger className="h-8 w-32" aria-label="包裹編號">
@@ -890,6 +966,9 @@ function OrdersPage() {
                         ))}
                       </SelectContent>
                     </Select>
+                  </TableCell>
+                  <TableCell className="max-w-52 truncate" title={order.notes}>
+                    {order.notes}
                   </TableCell>
                   <TableCell className="space-x-2">
                     <Link
@@ -909,7 +988,8 @@ function OrdersPage() {
                     </button>
                   </TableCell>
                 </TableRow>
-              ))}
+              );
+            })}
           </TableBody>
         </Table>
       </div>
@@ -923,7 +1003,6 @@ function OrdersPage() {
             setOrderToDeleteId(null);
           }
         }}
-        orderId={orderToDeleteId}
         error={deleteOrderError}
         isSubmitting={deleteOrderMutation.isPending}
         onConfirm={() => void confirmDeleteOrder()}

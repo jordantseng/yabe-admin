@@ -23,11 +23,13 @@ const parseAsPackagesPage = createParser({
 export const packagesListSearchParams = {
   q: parseAsString.withDefault(""),
   pkg: parseAsPackageFilter,
+  product: parseAsString.withDefault("全部"),
   page: parseAsPackagesPage,
 };
 
 export type PackagesListUrlState = {
   q: string;
   pkg: string;
+  product: string;
   page: number;
 };

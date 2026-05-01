@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Controller, useForm } from "react-hook-form";
+import { XIcon } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,6 +33,9 @@ function emptyOrderDetailForm(): OrderDetailFormValues {
     item: "",
     notes: "",
     purchaseDate: new Date().toISOString().slice(0, 10),
+    recipientName: "",
+    phone: "",
+    quantity: 1,
     buyer: "",
     domesticDeliveryAddress: "",
     payer: "虹",
@@ -52,6 +56,7 @@ function OrderDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isPersistedShippedLocked, setIsPersistedShippedLocked] = useState(false);
 
   const {
     register,
@@ -117,15 +122,18 @@ function OrderDetailPage() {
       setIsLoading(false);
       if (error) {
         setLoadError(error.message);
+        setIsPersistedShippedLocked(false);
         reset(emptyOrderDetailForm());
         return;
       }
       if (!data) {
         setLoadError("找不到此訂單");
+        setIsPersistedShippedLocked(false);
         reset(emptyOrderDetailForm());
         return;
       }
       const values = orderRecordToDetailForm(data);
+      setIsPersistedShippedLocked(values.productStatus === "已出貨");
       reset(values);
     })();
 
@@ -147,7 +155,9 @@ function OrderDetailPage() {
       return;
     }
     if (data) {
-      reset(orderRecordToDetailForm(data));
+      const nextValues = orderRecordToDetailForm(data);
+      setIsPersistedShippedLocked(nextValues.productStatus === "已出貨");
+      reset(nextValues);
       if (window.history.length > 1) {
         navigate(-1);
       } else {
@@ -180,27 +190,48 @@ function OrderDetailPage() {
         </p>
       )}
       {loadError && (
-        <p className="mb-4 text-sm text-destructive" role="alert">
-          {loadError}
-        </p>
-      )}
-      {saveError && (
-        <p className="mb-4 text-sm text-destructive" role="alert">
-          {saveError}
-        </p>
+        <div
+          className="mb-4 flex items-start justify-between gap-2 text-sm text-destructive"
+          role="alert"
+        >
+          <p>{loadError}</p>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-destructive"
+            onClick={() => setLoadError(null)}
+            aria-label="關閉錯誤訊息"
+          >
+            <XIcon className="h-4 w-4" />
+          </Button>
+        </div>
       )}
 
       <form onSubmit={handleSubmit(onSubmit)} className="mb-6 space-y-6">
-        <fieldset disabled={formDisabled || isSaving} className="contents">
+        <fieldset
+          disabled={formDisabled || isSaving || isPersistedShippedLocked}
+          className="contents"
+        >
           <div className="grid gap-4 rounded-md border p-4 md:grid-cols-2">
             <div className="md:col-span-2">
               <p className="text-xs font-semibold text-muted-foreground">
-                基本資料
+                訂單資訊
               </p>
             </div>
             <Field label="品項">
               <input
                 {...register("item", { required: true })}
+                className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
+              />
+            </Field>
+
+            <Field label="數量">
+              <input
+                type="number"
+                min={1}
+                step={1}
+                {...register("quantity", { valueAsNumber: true, required: true, min: 1 })}
                 className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
               />
             </Field>
@@ -220,20 +251,6 @@ function OrderDetailPage() {
               />
             </Field>
 
-            <Field label="備註">
-              <input
-                {...register("notes")}
-                className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
-              />
-            </Field>
-
-            <Field label="地址">
-              <input
-                {...register("domesticDeliveryAddress")}
-                className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
-              />
-            </Field>
-
             <Field label="付款人">
               <Controller
                 control={control}
@@ -241,8 +258,10 @@ function OrderDetailPage() {
                 rules={{ required: true }}
                 render={({ field }) => (
                   <Select
+                    disabled={formDisabled || isPersistedShippedLocked}
                     value={field.value}
                     onValueChange={(value) => {
+                      if (isPersistedShippedLocked) return;
                       if (value) field.onChange(value);
                     }}
                   >
@@ -258,6 +277,73 @@ function OrderDetailPage() {
               />
             </Field>
 
+            <Field label="包裹編號">
+              <Controller
+                control={control}
+                name="packageNumber"
+                rules={{ required: true }}
+                render={({ field }) => (
+                  <Select
+                    disabled={formDisabled || isPersistedShippedLocked}
+                    value={field.value}
+                    onValueChange={(value) => {
+                      if (isPersistedShippedLocked) return;
+                      if (value) field.onChange(value);
+                    }}
+                  >
+                    <SelectTrigger className="w-full" aria-label="包裹編號">
+                      <SelectValue placeholder="包裹編號" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="未指定">未指定</SelectItem>
+                      {packageNumberOptions.map((packageNumber) => (
+                        <SelectItem key={packageNumber} value={packageNumber}>
+                          {packageNumber}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            </Field>
+
+            <label className="space-y-1 md:col-span-2">
+              <span className="block text-sm font-medium">備註</span>
+              <textarea
+                {...register("notes")}
+                rows={4}
+                className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
+              />
+            </label>
+
+            <div className="md:col-span-2 mt-2">
+              <p className="text-xs font-semibold text-muted-foreground">
+                收件資訊
+              </p>
+            </div>
+
+            <Field label="收件人">
+              <input
+                {...register("recipientName", { required: true })}
+                className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
+              />
+            </Field>
+
+            <Field label="電話">
+              <input
+                {...register("phone")}
+                className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
+              />
+            </Field>
+
+            <label className="space-y-1 md:col-span-2">
+              <span className="block text-sm font-medium">地址</span>
+              <input
+                {...register("domesticDeliveryAddress")}
+                className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
+              />
+            </label>
+
             <div className="md:col-span-2 mt-2">
               <p className="text-xs font-semibold text-muted-foreground">
                 金額資訊
@@ -265,14 +351,6 @@ function OrderDetailPage() {
             </div>
 
             <div className="md:col-span-2 grid gap-4 md:grid-cols-4">
-              <Field label="成本">
-                <input
-                  type="number"
-                  {...register("cost", { valueAsNumber: true, required: true })}
-                  className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
-                />
-              </Field>
-
               <Field label="售價">
                 <input
                   type="number"
@@ -283,18 +361,13 @@ function OrderDetailPage() {
                   className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
                 />
               </Field>
-
-              <Field label="店到店運費">
+              <Field label="成本">
                 <input
                   type="number"
-                  {...register("domesticShippingFee", {
-                    valueAsNumber: true,
-                    required: true,
-                  })}
+                  {...register("cost", { valueAsNumber: true, required: true })}
                   className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
                 />
               </Field>
-
               <Field label="收益">
                 <input
                   type="number"
@@ -304,6 +377,16 @@ function OrderDetailPage() {
                   })}
                   readOnly
                   className="w-full rounded-md border border-input bg-muted px-3 py-2 text-sm"
+                />
+              </Field>
+              <Field label="運費">
+                <input
+                  type="number"
+                  {...register("domesticShippingFee", {
+                    valueAsNumber: true,
+                    required: true,
+                  })}
+                  className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
                 />
               </Field>
             </div>
@@ -321,8 +404,10 @@ function OrderDetailPage() {
                 rules={{ required: true }}
                 render={({ field }) => (
                   <Select
+                    disabled={formDisabled || isPersistedShippedLocked}
                     value={field.value}
                     onValueChange={(value)=> {
+                      if (isPersistedShippedLocked) return;
                       if (value) field.onChange(value);
                     }}
                   >
@@ -355,8 +440,17 @@ function OrderDetailPage() {
                 rules={{ required: true }}
                 render={({ field }) => (
                   <Select
+                    disabled={formDisabled || isPersistedShippedLocked}
                     value={field.value}
                     onValueChange={(value) => {
+                      if (isPersistedShippedLocked) {
+                        setSaveError("商品狀態已出貨後不可再修改");
+                        return;
+                      }
+                      if (value === "已出貨" && watch("paymentStatus") !== "已入帳") {
+                        setSaveError("收款狀態尚未入帳，不能將商品狀態改為已出貨");
+                        return;
+                      }
                       if (value) field.onChange(value);
                     }}
                   >
@@ -365,7 +459,7 @@ function OrderDetailPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="未購買">未購買</SelectItem>
-                      <SelectItem value="已購賣">已購賣</SelectItem>
+                      <SelectItem value="已購買">已購買</SelectItem>
                       <SelectItem value="到虹家">到虹家</SelectItem>
                       <SelectItem value="集運回台">集運回台</SelectItem>
                       <SelectItem value="到台灣">到台灣</SelectItem>
@@ -375,34 +469,24 @@ function OrderDetailPage() {
                 )}
               />
             </Field>
-
-            <Field label="包裹編號">
-              <Controller
-                control={control}
-                name="packageNumber"
-                rules={{ required: true }}
-                render={({ field }) => (
-                  <Select
-                    value={field.value}
-                    onValueChange={(value) => {
-                      if (value) field.onChange(value);
-                    }}
-                  >
-                    <SelectTrigger className="w-full" aria-label="包裹編號">
-                      <SelectValue placeholder="包裹編號" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="未指定">未指定</SelectItem>
-                      {packageNumberOptions.map((packageNumber) => (
-                        <SelectItem key={packageNumber} value={packageNumber}>
-                          {packageNumber}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              />
-            </Field>
+            {saveError && (
+              <div
+                className="md:col-span-2 mt-2 flex items-start justify-between gap-2 border-t pt-4 text-sm text-destructive"
+                role="alert"
+              >
+                <p>{saveError}</p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-destructive"
+                  onClick={() => setSaveError(null)}
+                  aria-label="關閉錯誤訊息"
+                >
+                  <XIcon className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
             <div className="md:col-span-2 mt-2 flex justify-end border-t pt-4">
               <Button
                 type="submit"
