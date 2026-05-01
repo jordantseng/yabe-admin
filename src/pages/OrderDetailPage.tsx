@@ -21,6 +21,8 @@ import { fetchPackageNumbersFromDb } from "@/lib/packages";
 
 const PACKAGE_NUMBERS_QUERY_KEY = ["packages", "numbers"] as const;
 
+const REQUIRED_MSG = "此欄位為必填";
+
 function paymentStatusTextClass(status: string): string {
   if (status === "未收款") return "text-red-500";
   if (status === "已收款") return "text-amber-500";
@@ -65,7 +67,7 @@ function OrderDetailPage() {
     reset,
     watch,
     setValue,
-    formState: { isDirty },
+    formState: { isDirty, errors },
   } = useForm<OrderDetailFormValues>({
     defaultValues: emptyOrderDetailForm(),
   });
@@ -86,11 +88,16 @@ function OrderDetailPage() {
   });
 
   useEffect(() => {
-    const nextRevenue =
-      (watchedPrice ?? 0) -
-      (watchedCost ?? 0) -
-      (watchedDomesticShippingFee ?? 0);
-    if (nextRevenue !== watchedRevenue) {
+    const price = Number.isFinite(watchedPrice) ? watchedPrice : 0;
+    const cost = Number.isFinite(watchedCost) ? watchedCost : 0;
+    const fee = Number.isFinite(watchedDomesticShippingFee)
+      ? watchedDomesticShippingFee
+      : 0;
+    const nextRevenue = price - cost - fee;
+    if (
+      !Number.isFinite(watchedRevenue) ||
+      nextRevenue !== watchedRevenue
+    ) {
       setValue("revenue", nextRevenue, { shouldDirty: true });
     }
   }, [
@@ -219,43 +226,54 @@ function OrderDetailPage() {
                 訂單資訊
               </p>
             </div>
-            <Field label="品項">
+            <Field label="品項" requiredMark error={errors.item?.message}>
               <input
-                {...register("item", { required: true })}
+                {...register("item", {
+                  required: REQUIRED_MSG,
+                  validate: (v) => v.trim() !== "" || REQUIRED_MSG,
+                })}
                 className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
               />
             </Field>
 
-            <Field label="數量">
+            <Field label="數量" requiredMark error={errors.quantity?.message}>
               <input
                 type="number"
                 min={1}
                 step={1}
-                {...register("quantity", { valueAsNumber: true, required: true, min: 1 })}
+                {...register("quantity", {
+                  required: REQUIRED_MSG,
+                  valueAsNumber: true,
+                  validate: (v) =>
+                    (Number.isFinite(v) && v >= 1) || "請輸入有效的數量（至少為 1）",
+                })}
                 className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
               />
             </Field>
 
-            <Field label="購買日期">
+            <Field label="購買日期" requiredMark error={errors.purchaseDate?.message}>
               <input
                 type="date"
-                {...register("purchaseDate", { required: true })}
+                {...register("purchaseDate", { required: REQUIRED_MSG })}
                 className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
               />
             </Field>
 
-            <Field label="購買人">
+            <Field label="購買人" requiredMark error={errors.buyer?.message}>
               <input
-                {...register("buyer", { required: true })}
+                {...register("buyer", {
+                  required: REQUIRED_MSG,
+                  validate: (v) => v.trim() !== "" || REQUIRED_MSG,
+                })}
                 className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
               />
             </Field>
 
-            <Field label="付款人">
+            <Field label="付款人" error={errors.payer?.message}>
               <Controller
                 control={control}
                 name="payer"
-                rules={{ required: true }}
+                rules={{ required: REQUIRED_MSG }}
                 render={({ field }) => (
                   <Select
                     disabled={formDisabled || isPersistedShippedLocked}
@@ -277,11 +295,11 @@ function OrderDetailPage() {
               />
             </Field>
 
-            <Field label="包裹編號">
+            <Field label="包裹編號" error={errors.packageNumber?.message}>
               <Controller
                 control={control}
                 name="packageNumber"
-                rules={{ required: true }}
+                rules={{ required: REQUIRED_MSG }}
                 render={({ field }) => (
                   <Select
                     disabled={formDisabled || isPersistedShippedLocked}
@@ -324,7 +342,7 @@ function OrderDetailPage() {
 
             <Field label="收件人">
               <input
-                {...register("recipientName", { required: true })}
+                {...register("recipientName")}
                 className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
               />
             </Field>
@@ -351,40 +369,51 @@ function OrderDetailPage() {
             </div>
 
             <div className="md:col-span-2 grid gap-4 md:grid-cols-4">
-              <Field label="售價">
+              <Field label="售價" error={errors.price?.message}>
                 <input
                   type="number"
                   {...register("price", {
-                    valueAsNumber: true,
-                    required: true,
+                    setValueAs: (v) => {
+                      if (v === "" || v === null || v === undefined) {
+                        return 0;
+                      }
+                      const n = Number(v);
+                      return Number.isFinite(n) ? n : 0;
+                    },
                   })}
                   className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
                 />
               </Field>
-              <Field label="成本">
+              <Field label="成本" error={errors.cost?.message}>
                 <input
                   type="number"
-                  {...register("cost", { valueAsNumber: true, required: true })}
+                  {...register("cost", {
+                    setValueAs: (v) => {
+                      if (v === "" || v === null || v === undefined) {
+                        return 0;
+                      }
+                      const n = Number(v);
+                      return Number.isFinite(n) ? n : 0;
+                    },
+                  })}
                   className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
                 />
               </Field>
               <Field label="收益">
                 <input
                   type="number"
-                  {...register("revenue", {
-                    valueAsNumber: true,
-                    required: true,
-                  })}
+                  {...register("revenue", { valueAsNumber: true })}
                   readOnly
                   className="w-full rounded-md border border-input bg-muted px-3 py-2 text-sm"
                 />
               </Field>
-              <Field label="運費">
+              <Field label="運費" error={errors.domesticShippingFee?.message}>
                 <input
                   type="number"
                   {...register("domesticShippingFee", {
+                    required: REQUIRED_MSG,
                     valueAsNumber: true,
-                    required: true,
+                    validate: (v) => Number.isFinite(v) || REQUIRED_MSG,
                   })}
                   className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
                 />
@@ -397,11 +426,11 @@ function OrderDetailPage() {
               </p>
             </div>
 
-            <Field label="收款狀態">
+            <Field label="收款狀態" error={errors.paymentStatus?.message}>
               <Controller
                 control={control}
                 name="paymentStatus"
-                rules={{ required: true }}
+                rules={{ required: REQUIRED_MSG }}
                 render={({ field }) => (
                   <Select
                     disabled={formDisabled || isPersistedShippedLocked}
@@ -433,11 +462,11 @@ function OrderDetailPage() {
               />
             </Field>
 
-            <Field label="商品狀態">
+            <Field label="商品狀態" error={errors.productStatus?.message}>
               <Controller
                 control={control}
                 name="productStatus"
-                rules={{ required: true }}
+                rules={{ required: REQUIRED_MSG }}
                 render={({ field }) => (
                   <Select
                     disabled={formDisabled || isPersistedShippedLocked}
@@ -502,11 +531,33 @@ function OrderDetailPage() {
   );
 }
 
-function Field({ label, children }: { label: string; children: ReactNode }) {
+function Field({
+  label,
+  children,
+  requiredMark,
+  error,
+}: {
+  label: string;
+  children: ReactNode;
+  requiredMark?: boolean;
+  error?: string;
+}) {
   return (
     <label className="space-y-1">
-      <span className="block text-sm font-medium">{label}</span>
+      <span className="block text-sm font-medium">
+        {label}
+        {requiredMark ? (
+          <span className="text-destructive" aria-hidden="true">
+            *
+          </span>
+        ) : null}
+      </span>
       {children}
+      {error ? (
+        <p className="text-sm text-destructive" role="alert">
+          {error}
+        </p>
+      ) : null}
     </label>
   );
 }

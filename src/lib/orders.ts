@@ -98,7 +98,7 @@ export function orderRecordToDetailForm(row: OrderRecord): OrderDetailFormValues
     item: row.item,
     notes: row.notes ?? "",
     purchaseDate: purchaseDateFromRecord(row.purchase_date),
-    recipientName: row.recipient_name ?? row.buyer,
+    recipientName: row.recipient_name ?? "",
     phone: row.recipient_phone ?? "",
     quantity: Number(row.quantity),
     buyer: row.buyer,
@@ -175,11 +175,11 @@ export type CreateOrderInput = {
   item: string;
   notes?: string;
   purchaseDate: string;
-  recipientName: string;
-  phone: string;
+  recipientName?: string;
+  phone?: string;
   quantity: number;
   buyer: string;
-  domesticDeliveryAddress: string;
+  domesticDeliveryAddress?: string;
   payer: OrderRecord["payer"];
   cost: number;
   price: number;
@@ -203,11 +203,11 @@ export async function createOrder(input: CreateOrderInput): Promise<{
       item: input.item.trim(),
       notes: input.notes?.trim() || null,
       purchase_date: purchaseDate,
-      recipient_name: input.recipientName.trim() || null,
-      recipient_phone: input.phone.trim() || null,
+      recipient_name: (input.recipientName ?? "").trim() || null,
+      recipient_phone: (input.phone ?? "").trim() || null,
       quantity: Number.isFinite(input.quantity) ? Math.max(1, Math.trunc(input.quantity)) : 1,
       buyer: input.buyer.trim(),
-      domestic_delivery_address: input.domesticDeliveryAddress.trim(),
+      domestic_delivery_address: (input.domesticDeliveryAddress ?? "").trim(),
       payer: input.payer,
       cost: input.cost,
       price: input.price,
@@ -263,6 +263,8 @@ export type FetchOrdersForPackagePageOptions = {
   /** `全部` | numeric (`1`, `2`) | legacy `package_number`（僅限已指派 `package_id`） */
   packageFilter?: string;
   productStatus?: string;
+  /** `全部` | `虹` | `藍` */
+  payer?: string;
   page?: number;
   pageSize?: number;
 };
@@ -306,6 +308,10 @@ export async function fetchOrdersForPackagePage(
   const prod = options.productStatus?.trim();
   if (prod && prod !== "全部") {
     query = query.eq("product_status", prod);
+  }
+  const payerFilter = options.payer?.trim() ?? "全部";
+  if (payerFilter === "虹" || payerFilter === "藍") {
+    query = query.eq("payer", payerFilter);
   }
 
   const { data, error } = await query;
@@ -489,6 +495,12 @@ export async function updateOrderFromDetailForm(
     }
   }
 
+  const safeCost = Number.isFinite(values.cost) ? values.cost : 0;
+  const safePrice = Number.isFinite(values.price) ? values.price : 0;
+  const safeDomesticShippingFee = Number.isFinite(values.domesticShippingFee)
+    ? values.domesticShippingFee
+    : 0;
+
   const { data, error } = await supabase
     .from("orders")
     .update({
@@ -501,9 +513,9 @@ export async function updateOrderFromDetailForm(
       buyer: values.buyer.trim(),
       domestic_delivery_address: values.domesticDeliveryAddress.trim(),
       payer: values.payer as OrderRecord["payer"],
-      cost: values.cost,
-      price: values.price,
-      domestic_shipping_fee: values.domesticShippingFee,
+      cost: safeCost,
+      price: safePrice,
+      domestic_shipping_fee: safeDomesticShippingFee,
       payment_status: values.paymentStatus as OrderRecord["payment_status"],
       product_status: values.productStatus as OrderRecord["product_status"],
       package_number: packageNumber,

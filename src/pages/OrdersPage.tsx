@@ -64,27 +64,6 @@ function paymentStatusTextClass(status: string): string {
   return "";
 }
 
-function createEmptyNewOrderDraft(): NewOrderDraft {
-  return {
-    item: "",
-    notes: "",
-    purchaseDate: new Date().toISOString().slice(0, 10),
-    recipientName: "",
-    phone: "",
-    quantity: "1",
-    buyer: "",
-    domesticDeliveryAddress: "",
-    payer: "虹",
-    cost: "0",
-    price: "0",
-    domesticShippingFee: "0",
-    revenue: "0",
-    paymentStatus: "未收款",
-    productStatus: "未購買",
-    packageNumber: "未指定",
-  };
-}
-
 function OrdersPage() {
   const [isCreateOrderDialogOpen, setIsCreateOrderDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
@@ -110,7 +89,6 @@ function OrdersPage() {
   const [bulkPackageNumber, setBulkPackageNumber] = useState("未指定");
   const queryClient = useQueryClient();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const [newOrder, setNewOrder] = useState<NewOrderDraft>(createEmptyNewOrderDraft);
 
   const ordersQuery = useQuery({
     queryKey: [ORDERS_QUERY_KEY, listUrl],
@@ -281,27 +259,33 @@ function OrdersPage() {
     setIsDeleteDialogOpen(false);
   };
 
-  const handleCreateOrder = async () => {
+  const handleCreateOrder = async (newOrder: NewOrderDraft) => {
     const item = newOrder.item.trim();
     const buyer = newOrder.buyer.trim();
     const recipientName = newOrder.recipientName.trim();
     const phone = newOrder.phone.trim();
     const quantityNumber = Number.parseInt(newOrder.quantity, 10);
     const domesticDeliveryAddress = newOrder.domesticDeliveryAddress.trim();
+    const purchaseDate = newOrder.purchaseDate.trim();
     if (
       !item ||
       !buyer ||
-      !recipientName ||
-      !phone ||
-      !domesticDeliveryAddress ||
+      !purchaseDate ||
       !Number.isFinite(quantityNumber) ||
       quantityNumber < 1
     ) {
       return;
     }
 
-    const costNumber = Number.parseFloat(newOrder.cost);
-    const priceNumber = Number.parseFloat(newOrder.price);
+    const costTrim = newOrder.cost.trim();
+    const priceTrim = newOrder.price.trim();
+    const costNumber =
+      costTrim === "" ? 0 : Number.parseFloat(newOrder.cost);
+    const priceNumber =
+      priceTrim === "" ? 0 : Number.parseFloat(newOrder.price);
+    if (!Number.isFinite(costNumber) || !Number.isFinite(priceNumber)) {
+      return;
+    }
     const domesticShippingFeeNumber = Number.parseFloat(
       newOrder.domesticShippingFee
     );
@@ -310,15 +294,15 @@ function OrdersPage() {
     const createResult = await createOrderMutation.mutateAsync({
       item,
       notes: newOrder.notes,
-      purchaseDate: newOrder.purchaseDate,
-      recipientName,
-      phone,
+      purchaseDate,
+      recipientName: recipientName || undefined,
+      phone: phone || undefined,
       quantity: quantityNumber,
       buyer,
-      domesticDeliveryAddress,
+      domesticDeliveryAddress: domesticDeliveryAddress || undefined,
       payer: newOrder.payer,
-      cost: Number.isNaN(costNumber) ? 0 : costNumber,
-      price: Number.isNaN(priceNumber) ? 0 : priceNumber,
+      cost: costNumber,
+      price: priceNumber,
       domesticShippingFee: Number.isNaN(domesticShippingFeeNumber)
         ? 0
         : domesticShippingFeeNumber,
@@ -331,7 +315,6 @@ function OrdersPage() {
       return;
     }
 
-    setNewOrder(createEmptyNewOrderDraft());
     setIsCreateOrderDialogOpen(false);
   };
 
@@ -482,15 +465,12 @@ function OrdersPage() {
               setIsCreateOrderDialogOpen(open);
               if (!open) {
                 setCreateOrderError(null);
-                setNewOrder(createEmptyNewOrderDraft());
               }
             }}
             createOrderError={createOrderError}
             isSubmitting={createOrderMutation.isPending}
-            newOrder={newOrder}
-            setNewOrder={setNewOrder}
             packageNumberOptions={packageNumberOptions}
-            onCreate={() => void handleCreateOrder()}
+            onCreate={(draft) => void handleCreateOrder(draft)}
           />
         </div>
       </div>

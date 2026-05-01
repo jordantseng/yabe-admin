@@ -55,7 +55,7 @@ import {
   updateOrderFields,
   type OrderWithPackageNumber,
 } from "@/lib/orders";
-import type { OrderProductStatus } from "@/types/database";
+import type { OrderPayer, OrderProductStatus } from "@/types/database";
 
 const PACKAGE_PAGE_SIZE = 15;
 const PACKAGE_ROWS_QUERY_KEY = ["packages", "page-rows"] as const;
@@ -74,6 +74,7 @@ export type PackageTableRow = {
   orderNotes: string;
   purchaseDate: string;
   buyer: string;
+  payer: OrderPayer;
   recipientName: string;
   phone: string;
   address: string;
@@ -124,6 +125,7 @@ function orderToPackageTableRow(row: OrderWithPackageNumber): PackageTableRow {
     orderNotes: row.notes ?? "",
     purchaseDate: purchaseDateSlice(row.purchase_date),
     buyer: row.buyer,
+    payer: row.payer,
     recipientName: row.recipient_name ?? "",
     phone: row.recipient_phone ?? "",
     address: row.domestic_delivery_address ?? "",
@@ -185,6 +187,7 @@ function PackagePage() {
     useState<string>("全部");
   const [draftFilterProductStatus, setDraftFilterProductStatus] =
     useState<string>("全部");
+  const [draftFilterPayer, setDraftFilterPayer] = useState<string>("全部");
   const [rowFieldError, setRowFieldError] = useState<string | null>(null);
   const [isEditPackageFeeDialogOpen, setIsEditPackageFeeDialogOpen] =
     useState(false);
@@ -199,12 +202,20 @@ function PackagePage() {
   const [packageToSettle, setPackageToSettle] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const rowsQuery = useQuery({
-    queryKey: [PACKAGE_ROWS_QUERY_KEY, listUrl.q, listUrl.pkg, listUrl.product, listUrl.page],
+    queryKey: [
+      PACKAGE_ROWS_QUERY_KEY,
+      listUrl.q,
+      listUrl.pkg,
+      listUrl.product,
+      listUrl.payer,
+      listUrl.page,
+    ],
     queryFn: async () => {
       const res = await fetchOrdersForPackagePage({
         itemSearch: listUrl.q,
         packageFilter: listUrl.pkg,
         productStatus: listUrl.product,
+        payer: listUrl.payer,
         page: listUrl.page,
         pageSize: PACKAGE_PAGE_SIZE,
       });
@@ -281,7 +292,7 @@ function PackagePage() {
   }, [safeCurrentPage, listUrl.page, setListUrl]);
 
   const patchListUrl = (
-    patch: Partial<{ q: string; pkg: string; product: string; page: number }>
+    patch: Partial<{ q: string; pkg: string; product: string; payer: string; page: number }>
   ) => {
     void setListUrl(patch);
   };
@@ -424,6 +435,7 @@ function PackagePage() {
     if (open) {
       setDraftFilterPackageNumber(listUrl.pkg);
       setDraftFilterProductStatus(listUrl.product);
+      setDraftFilterPayer(listUrl.payer);
     }
   };
 
@@ -431,6 +443,7 @@ function PackagePage() {
     void setListUrl({
       pkg: draftFilterPackageNumber,
       product: draftFilterProductStatus,
+      payer: draftFilterPayer,
       page: 1,
     });
     setIsFilterPopoverOpen(false);
@@ -516,7 +529,7 @@ function PackagePage() {
               <DialogHeader>
                 <DialogTitle>新增包裹編號</DialogTitle>
                 <DialogDescription>
-                  編號由資料庫自動遞增（1、2、3…）。可填選填備註。
+                  編號由資料庫自動遞增（1、2、3…）。可填備註。
                 </DialogDescription>
               </DialogHeader>
               {createPackageError && (
@@ -543,7 +556,7 @@ function PackagePage() {
                   <Input
                     value={newPackageNotes}
                     onChange={(event) => setNewPackageNotes(event.target.value)}
-                    placeholder="備註（選填）"
+                    placeholder="備註"
                     aria-label="包裹備註"
                   />
                 </div>
@@ -606,7 +619,7 @@ function PackagePage() {
                 type="button"
                 variant="outline"
                 size="icon"
-                aria-label="篩選包裹編號"
+                aria-label="篩選列表"
               >
                 <FilterIcon className="h-4 w-4" />
               </Button>
@@ -664,6 +677,26 @@ function PackagePage() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-1">
+                <p className="text-sm font-medium">付款人</p>
+                <Select
+                  value={draftFilterPayer}
+                  onValueChange={(value) => {
+                    if (value) {
+                      setDraftFilterPayer(value);
+                    }
+                  }}
+                >
+                  <SelectTrigger aria-label="篩選付款人">
+                    <SelectValue placeholder="付款人" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="全部">全部付款人</SelectItem>
+                    <SelectItem value="虹">虹</SelectItem>
+                    <SelectItem value="藍">藍</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               <Button
                 type="button"
                 className="w-full"
@@ -711,6 +744,18 @@ function PackagePage() {
             className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-3 py-1 text-xs"
           >
             商品狀態: {listUrl.product}
+            <span aria-hidden="true">×</span>
+          </button>
+        )}
+        {listUrl.payer !== "全部" && (
+          <button
+            type="button"
+            onClick={() => {
+              patchListUrl({ payer: "全部", page: 1 });
+            }}
+            className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-3 py-1 text-xs"
+          >
+            付款人: {listUrl.payer}
             <span aria-hidden="true">×</span>
           </button>
         )}
@@ -772,7 +817,7 @@ function PackagePage() {
       )}
 
       <div className="overflow-x-auto">
-        <Table className="min-w-[1240px]">
+        <Table className="min-w-[1300px]">
           <TableHeader>
             <TableRow>
               <TableHead>包裹編號</TableHead>
@@ -780,6 +825,7 @@ function PackagePage() {
               <TableHead>數量</TableHead>
               <TableHead>購買日期</TableHead>
               <TableHead>購買人</TableHead>
+              <TableHead>付款人</TableHead>
               <TableHead>收件人</TableHead>
               <TableHead>電話</TableHead>
               <TableHead className="min-w-48">收件地址</TableHead>
@@ -812,6 +858,9 @@ function PackagePage() {
                     <Skeleton className="h-4 w-24" />
                   </TableCell>
                   <TableCell>
+                    <Skeleton className="h-4 w-10" />
+                  </TableCell>
+                  <TableCell>
                     <Skeleton className="h-4 w-20" />
                   </TableCell>
                   <TableCell>
@@ -819,9 +868,6 @@ function PackagePage() {
                   </TableCell>
                   <TableCell>
                     <Skeleton className="h-4 w-24" />
-                  </TableCell>
-                  <TableCell>
-                    <Skeleton className="h-4 w-40" />
                   </TableCell>
                   <TableCell>
                     <Skeleton className="h-4 w-14 ml-auto" />
@@ -849,7 +895,7 @@ function PackagePage() {
             ) : rowsError ? (
               <TableRow>
                 <TableCell
-                  colSpan={15}
+                  colSpan={16}
                   className="h-24 text-center text-sm text-muted-foreground"
                 >
                   無法載入列表，請見上方錯誤說明。
@@ -858,13 +904,15 @@ function PackagePage() {
             ) : rows.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={15}
+                  colSpan={16}
                   className="h-24 text-center text-sm text-muted-foreground"
                 >
                   {listUrl.q.trim() !== ""
                     ? "沒有符合品項搜尋的訂單。"
                     : listUrl.pkg !== "全部"
                     ? "此篩選條件下沒有訂單，或包裹編號不存在。"
+                    : listUrl.payer !== "全部"
+                    ? "此付款人篩選下沒有訂單。"
                     : "尚無已指派包裹的訂單。"}
                 </TableCell>
               </TableRow>
@@ -873,7 +921,7 @@ function PackagePage() {
                 <Fragment key={group.label}>
                   <TableRow className="bg-muted/60 hover:bg-muted/60">
                     <TableCell
-                      colSpan={14}
+                      colSpan={15}
                       className="py-3 text-sm font-semibold tracking-tight"
                     >
                       {group.label === "未指定"
@@ -971,6 +1019,7 @@ function PackagePage() {
                       <TableCell className="max-w-32 truncate" title={row.buyer}>
                         {row.buyer}
                       </TableCell>
+                      <TableCell>{row.payer}</TableCell>
                       <TableCell className="max-w-32 truncate" title={row.recipientName}>
                         {row.recipientName}
                       </TableCell>
