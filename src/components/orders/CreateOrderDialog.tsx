@@ -314,8 +314,8 @@ export function CreateOrderDialog({
 
             <section className="min-w-0 space-y-3 rounded-md border p-3">
               <p className="text-xs font-semibold text-muted-foreground">收件資訊</p>
-              <div className="grid min-w-0 gap-3 md:grid-cols-3">
-                <div className="space-y-1">
+              <div className="grid min-w-0 gap-3 md:grid-cols-2">
+                <div className="min-w-0 space-y-1">
                   <label htmlFor="new-order-recipient-name" className="text-sm font-medium">
                     收件人
                   </label>
@@ -326,7 +326,7 @@ export function CreateOrderDialog({
                     aria-label="收件人"
                   />
                 </div>
-                <div className="space-y-1">
+                <div className="min-w-0 space-y-1">
                   <label htmlFor="new-order-phone" className="text-sm font-medium">
                     電話
                   </label>
@@ -337,7 +337,7 @@ export function CreateOrderDialog({
                     aria-label="電話"
                   />
                 </div>
-                <div className="space-y-1 md:col-span-3">
+                <div className="space-y-1 md:col-span-2">
                   <label htmlFor="new-order-address" className="text-sm font-medium">
                     收件地址
                   </label>
