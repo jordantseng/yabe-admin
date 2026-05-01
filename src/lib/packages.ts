@@ -98,6 +98,25 @@ export async function settlePackageByNumber(
   return { error: null };
 }
 
+/** Next `packages.number` that the DB will assign (identity sequence peek; no insert). */
+export async function peekNextPackageNumber(): Promise<{
+  data: number | null;
+  error: { message: string } | null;
+}> {
+  const { data, error } = await supabase.rpc("peek_next_package_number");
+  if (error) {
+    return { data: null, error: { message: error.message } };
+  }
+  if (data == null) {
+    return { data: null, error: null };
+  }
+  const n = typeof data === "number" ? data : Number(data);
+  return {
+    data: Number.isFinite(n) ? n : null,
+    error: null,
+  };
+}
+
 /** All `packages.number` as strings, ascending (for dropdowns / filters). */
 export async function fetchPackageNumbersFromDb(): Promise<{
   data: string[] | null;

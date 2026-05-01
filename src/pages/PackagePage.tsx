@@ -1,10 +1,4 @@
-import {
-  Fragment,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { EyeIcon, FilterIcon, XIcon } from "lucide-react";
 import { useQueryStates } from "nuqs";
@@ -45,6 +39,7 @@ import {
 import {
   createPackage,
   fetchPackageNumbersFromDb,
+  peekNextPackageNumber,
   settlePackageByNumber,
   updatePackageInternationalShippingFeeByNumber,
 } from "@/lib/packages";
@@ -60,6 +55,7 @@ import type { OrderPayer, OrderProductStatus } from "@/types/database";
 const PACKAGE_PAGE_SIZE = 15;
 const PACKAGE_ROWS_QUERY_KEY = ["packages", "page-rows"] as const;
 const PACKAGE_NUMBERS_QUERY_KEY = ["packages", "numbers"] as const;
+const PACKAGE_NEXT_NUMBER_QUERY_KEY = ["packages", "next-number-peek"] as const;
 const EMPTY_PACKAGE_ROWS: PackageTableRow[] = [];
 const EMPTY_PACKAGE_NUMBERS: string[] = [];
 
@@ -112,9 +108,11 @@ function displayPackageNumber(row: OrderWithPackageNumber): string {
 }
 
 function orderToPackageTableRow(row: OrderWithPackageNumber): PackageTableRow {
-  const packageRel = row.packages as
-    | { international_shipping_fee?: number; notes?: string | null; is_settled?: boolean }
-    | null;
+  const packageRel = row.packages as {
+    international_shipping_fee?: number;
+    notes?: string | null;
+    is_settled?: boolean;
+  } | null;
   return {
     id: row.id,
     packageNumber: displayPackageNumber(row),
@@ -132,7 +130,9 @@ function orderToPackageTableRow(row: OrderWithPackageNumber): PackageTableRow {
     cost: String(row.cost),
     price: String(row.price),
     domesticShippingFee: String(row.domestic_shipping_fee),
-    internationalShippingFee: String(packageRel?.international_shipping_fee ?? 0),
+    internationalShippingFee: String(
+      packageRel?.international_shipping_fee ?? 0
+    ),
     revenue: revenueStringFromCostPrice(row.cost, row.price),
     productStatus: row.product_status,
   };
@@ -177,8 +177,10 @@ function PackagePage() {
   const [isCreatePackageDialogOpen, setIsCreatePackageDialogOpen] =
     useState(false);
   const [newPackageNotes, setNewPackageNotes] = useState("");
-  const [newPackageInternationalShippingFee, setNewPackageInternationalShippingFee] =
-    useState("0");
+  const [
+    newPackageInternationalShippingFee,
+    setNewPackageInternationalShippingFee,
+  ] = useState("0");
   const [createPackageError, setCreatePackageError] = useState<string | null>(
     null
   );
@@ -194,11 +196,16 @@ function PackagePage() {
   const [packageToEditFee, setPackageToEditFee] = useState<string | null>(null);
   const [editPackageFeeValue, setEditPackageFeeValue] = useState("0");
   const [editPackageFeeError, setEditPackageFeeError] = useState<string | null>(
-    null,
+    null
   );
-  const [settlePackageError, setSettlePackageError] = useState<string | null>(null);
-  const [dismissedRowsError, setDismissedRowsError] = useState<string | null>(null);
-  const [isSettlePackageDialogOpen, setIsSettlePackageDialogOpen] = useState(false);
+  const [settlePackageError, setSettlePackageError] = useState<string | null>(
+    null
+  );
+  const [dismissedRowsError, setDismissedRowsError] = useState<string | null>(
+    null
+  );
+  const [isSettlePackageDialogOpen, setIsSettlePackageDialogOpen] =
+    useState(false);
   const [packageToSettle, setPackageToSettle] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const rowsQuery = useQuery({
@@ -240,18 +247,41 @@ function PackagePage() {
     },
   });
 
+  const nextPackageNumberQuery = useQuery({
+    queryKey: PACKAGE_NEXT_NUMBER_QUERY_KEY,
+    queryFn: async () => {
+      const res = await peekNextPackageNumber();
+      if (res.error) {
+        throw new Error(res.error.message);
+      }
+      if (res.data == null) {
+        throw new Error("無法取得下一個包裹編號");
+      }
+      return res.data;
+    },
+    enabled: isCreatePackageDialogOpen,
+  });
+
   const invalidatePackageRows = () => {
     void queryClient.invalidateQueries({ queryKey: [PACKAGE_ROWS_QUERY_KEY] });
   };
   const createPackageMutation = useMutation({
     mutationFn: createPackage,
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: PACKAGE_NUMBERS_QUERY_KEY });
+      void queryClient.invalidateQueries({
+        queryKey: PACKAGE_NUMBERS_QUERY_KEY,
+      });
+      void queryClient.invalidateQueries({
+        queryKey: PACKAGE_NEXT_NUMBER_QUERY_KEY,
+      });
       invalidatePackageRows();
     },
   });
   const updateOrderFieldMutation = useMutation({
-    mutationFn: async (args: { id: string; patch: Parameters<typeof updateOrderFields>[1] }) => {
+    mutationFn: async (args: {
+      id: string;
+      patch: Parameters<typeof updateOrderFields>[1];
+    }) => {
       const { error } = await updateOrderFields(args.id, args.patch);
       if (error) throw new Error(error.message);
     },
@@ -261,7 +291,7 @@ function PackagePage() {
     mutationFn: async (args: { pkg: string; fee: number }) => {
       const { error } = await updatePackageInternationalShippingFeeByNumber(
         args.pkg,
-        args.fee,
+        args.fee
       );
       if (error) throw new Error(error.message);
     },
@@ -292,7 +322,13 @@ function PackagePage() {
   }, [safeCurrentPage, listUrl.page, setListUrl]);
 
   const patchListUrl = (
-    patch: Partial<{ q: string; pkg: string; product: string; payer: string; page: number }>
+    patch: Partial<{
+      q: string;
+      pkg: string;
+      product: string;
+      payer: string;
+      page: number;
+    }>
   ) => {
     void setListUrl(patch);
   };
@@ -303,7 +339,8 @@ function PackagePage() {
     });
   };
   const rows = rowsQuery.data?.rows ?? EMPTY_PACKAGE_ROWS;
-  const packageNumberOptions = packageNumbersQuery.data ?? EMPTY_PACKAGE_NUMBERS;
+  const packageNumberOptions =
+    packageNumbersQuery.data ?? EMPTY_PACKAGE_NUMBERS;
   const rowsLoading = rowsQuery.isLoading;
   const rowsError = (rowsQuery.error as Error | null)?.message ?? null;
 
@@ -415,7 +452,9 @@ function PackagePage() {
     setCreatePackageError(null);
     const { data, error } = await createPackageMutation.mutateAsync({
       notes: newPackageNotes.trim() || null,
-      internationalShippingFee: Number.parseFloat(newPackageInternationalShippingFee),
+      internationalShippingFee: Number.parseFloat(
+        newPackageInternationalShippingFee
+      ),
     });
     if (error) {
       setCreatePackageError(error.message);
@@ -473,7 +512,6 @@ function PackagePage() {
     }
   };
 
-
   const openEditPackageFeeDialog = (pkg: string, currentFee: string) => {
     const group = groupedRows.find((g) => g.label === pkg);
     if (group?.rows[0]?.packageSettled) {
@@ -522,15 +560,10 @@ function PackagePage() {
               }
             }}
           >
-            <DialogTrigger
-              render={<Button type="button">新增包裹編號</Button>}
-            />
+            <DialogTrigger render={<Button type="button">新增包裹</Button>} />
             <DialogContent>
               <DialogHeader>
-                <DialogTitle>新增包裹編號</DialogTitle>
-                <DialogDescription>
-                  編號由資料庫自動遞增（1、2、3…）。可填備註。
-                </DialogDescription>
+                <DialogTitle>新增包裹</DialogTitle>
               </DialogHeader>
               {createPackageError && (
                 <div
@@ -552,6 +585,23 @@ function PackagePage() {
               )}
               <div className="py-2">
                 <div className="space-y-1">
+                  <label className="text-sm font-medium">
+                    {nextPackageNumberQuery.isLoading ? (
+                      <>正在載入下一個包裹編號…</>
+                    ) : nextPackageNumberQuery.isError ? (
+                      <>
+                        編號由資料庫自動遞增（1、2、3…）。無法預覽下一個編號時仍可直接新增。
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-semibold text-foreground">
+                          包裹編號：{nextPackageNumberQuery.data}
+                        </span>
+                      </>
+                    )}
+                  </label>
+                </div>
+                <div className="mt-2 space-y-1">
                   <label className="text-sm font-medium">備註</label>
                   <Input
                     value={newPackageNotes}
@@ -934,7 +984,8 @@ function PackagePage() {
                       )}
                       {group.label !== "未指定" && (
                         <span className="ml-3 font-normal text-muted-foreground">
-                          國際運費: {group.rows[0]?.internationalShippingFee ?? "0"}
+                          國際運費:{" "}
+                          {group.rows[0]?.internationalShippingFee ?? "0"}
                         </span>
                       )}
                       {group.label !== "未指定" &&
@@ -950,34 +1001,35 @@ function PackagePage() {
                     <TableCell className="py-3 space-x-2">
                       {group.label !== "未指定" &&
                         group.rows[0]?.packageSettled !== true && (
-                        <Button
-                          type="button"
-                          variant="default"
-                          className="h-8 px-3"
-                          disabled={
-                            !group.rows.every((r) => r.productStatus === "已出貨") ||
-                            settlePackageMutation.isPending
-                          }
-                          onClick={() => openSettlePackageDialog(group.label)}
-                        >
-                          結清包裹
-                        </Button>
+                          <Button
+                            type="button"
+                            variant="default"
+                            className="h-8 px-3"
+                            disabled={
+                              !group.rows.every(
+                                (r) => r.productStatus === "已出貨"
+                              ) || settlePackageMutation.isPending
+                            }
+                            onClick={() => openSettlePackageDialog(group.label)}
+                          >
+                            結清包裹
+                          </Button>
                         )}
                       {group.label !== "未指定" &&
                         group.rows[0]?.packageSettled !== true && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-8 px-3"
-                          onClick={() =>
-                            openEditPackageFeeDialog(
-                              group.label,
-                              group.rows[0]?.internationalShippingFee ?? "0",
-                            )
-                          }
-                        >
-                          修改運費
-                        </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-8 px-3"
+                            onClick={() =>
+                              openEditPackageFeeDialog(
+                                group.label,
+                                group.rows[0]?.internationalShippingFee ?? "0"
+                              )
+                            }
+                          >
+                            修改運費
+                          </Button>
                         )}
                     </TableCell>
                   </TableRow>
@@ -1016,14 +1068,23 @@ function PackagePage() {
                       <TableCell className="tabular-nums">
                         {row.purchaseDate}
                       </TableCell>
-                      <TableCell className="max-w-32 truncate" title={row.buyer}>
+                      <TableCell
+                        className="max-w-32 truncate"
+                        title={row.buyer}
+                      >
                         {row.buyer}
                       </TableCell>
                       <TableCell>{row.payer}</TableCell>
-                      <TableCell className="max-w-32 truncate" title={row.recipientName}>
+                      <TableCell
+                        className="max-w-32 truncate"
+                        title={row.recipientName}
+                      >
                         {row.recipientName}
                       </TableCell>
-                      <TableCell className="max-w-36 truncate" title={row.phone}>
+                      <TableCell
+                        className="max-w-36 truncate"
+                        title={row.phone}
+                      >
                         {row.phone}
                       </TableCell>
                       <TableCell
@@ -1047,7 +1108,9 @@ function PackagePage() {
                       <TableCell>
                         <Select
                           value={row.productStatus}
-                          disabled={row.packageSettled || row.productStatus === "已出貨"}
+                          disabled={
+                            row.packageSettled || row.productStatus === "已出貨"
+                          }
                           onValueChange={(value) =>
                             handleProductStatusChange(row.id, value)
                           }
@@ -1105,10 +1168,15 @@ function PackagePage() {
             <>
               <p>
                 總營業額:{" "}
-                <span className="font-semibold">{totals.totalPrice.toLocaleString()}</span>
+                <span className="font-semibold">
+                  {totals.totalPrice.toLocaleString()}
+                </span>
               </p>
               <p>
-                總成本: <span className="font-semibold">{totals.totalCost.toLocaleString()}</span>
+                總成本:{" "}
+                <span className="font-semibold">
+                  {totals.totalCost.toLocaleString()}
+                </span>
               </p>
               <p>
                 總國際運費:{" "}
@@ -1123,7 +1191,10 @@ function PackagePage() {
                 </span>
               </p>
               <p>
-                收益: <span className="font-semibold">{totals.totalProfit.toLocaleString()}</span>
+                收益:{" "}
+                <span className="font-semibold">
+                  {totals.totalProfit.toLocaleString()}
+                </span>
               </p>
             </>
           )}
@@ -1134,7 +1205,9 @@ function PackagePage() {
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => patchListUrl({ page: Math.max(1, safeCurrentPage - 1) })}
+            onClick={() =>
+              patchListUrl({ page: Math.max(1, safeCurrentPage - 1) })
+            }
             disabled={rowsLoading || safeCurrentPage === 1}
           >
             上一頁
