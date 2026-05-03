@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { NuqsAdapter } from "nuqs/adapters/react-router/v7";
 import { BrowserRouter } from "react-router-dom";
 import { AuthProvider } from "@/auth/AuthContext";
+import { captureInvitePendingPasswordSetup } from "@/lib/auth-password-setup";
 import { supabase } from "@/lib/supabase";
 import "./index.css";
 import App from "./App.tsx";
@@ -17,6 +18,7 @@ const queryClient = new QueryClient();
  *    （implicit 流程可不帶 verifier；仍失敗則多半是 Redirect URL / 連結過期）。
  */
 async function bootstrap() {
+  captureInvitePendingPasswordSetup();
   await supabase.auth.getSession();
 
   const url = new URL(window.location.href);
