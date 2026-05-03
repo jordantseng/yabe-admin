@@ -11,12 +11,26 @@ import App from "./App.tsx";
 const queryClient = new QueryClient();
 
 /**
- * 邀請／magic link 會把 access_token 放在 `location.hash`。
- * 必須在 React Router 做任何 `<Navigate>` 之前完成 auth `initialize`，
- * 否則導向 `/orders` 或 `/login` 會先換掉網址，hash 消失就無法建立 session。
+ * 1) 邀請／magic link：token 可能在 `#`（implicit）或 `?code=`（PKCE）。
+ *    從信箱開連結時通常沒有 PKCE verifier，GoTrue 會略過 URL → 必須在 Router 渲染前處理。
+ * 2) 若僅有 `?code=` 且第一次 initialize 沒建立 session，再試 `exchangeCodeForSession`
+ *    （implicit 流程可不帶 verifier；仍失敗則多半是 Redirect URL / 連結過期）。
  */
 async function bootstrap() {
   await supabase.auth.getSession();
+
+  const url = new URL(window.location.href);
+  const code = url.searchParams.get("code");
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
+  if (!session && code) {
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error && import.meta.env.DEV) {
+      console.warn("[auth] exchangeCodeForSession:", error.message);
+    }
+  }
 
   createRoot(document.getElementById("root")!).render(
     <StrictMode>
