@@ -1,14 +1,5 @@
 /**
- * Matches public schema after migrations:
- * - 20260429120000_create_orders.sql
- * - 20260515120000_packages_and_order_links.sql
- * - 20260429154500_drop_orders_revenue.sql
- * - 20260429160000_add_shipping_fees.sql
- * - 20260429193000_add_order_notes.sql
- * - 20260429200000_add_order_recipient_and_address.sql
- * - 20260429201500_add_order_phone_and_remove_duplicate_address.sql
- * - 20260429213500_add_order_quantity.sql
- * - 20260429220500_add_package_settled_flag.sql
+ * Matches public schema from supabase/migrations/20260429120000_initial_schema.sql
  */
 
 export type PackageStatus =
