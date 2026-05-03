@@ -28,7 +28,10 @@ function LoginPage() {
 
   const onSubmit = async (values: LoginForm) => {
     setFormError(null);
-    const { error } = await signInWithPassword(values.email.trim(), values.password);
+    const { error } = await signInWithPassword(
+      values.email.trim(),
+      values.password
+    );
     if (error) {
       setFormError(error);
       return;
@@ -41,7 +44,9 @@ function LoginPage() {
       <div className="w-full max-w-sm space-y-6">
         <div>
           <h1 className="text-xl font-semibold">登入</h1>
-          <p className="mt-1 text-sm text-muted-foreground">使用 Supabase 帳號登入後台。</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            使用 Supabase 帳號登入後台。
+          </p>
         </div>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -78,14 +83,7 @@ function LoginPage() {
             {isSubmitting ? "登入中…" : "登入"}
           </Button>
         </form>
-
-        <p className="text-center text-xs text-muted-foreground">
-          需在 Supabase 專案啟用 Email 登入並新增使用者（Authentication → Providers）。
-        </p>
       </div>
-      <Link to="/orders" className="text-sm text-muted-foreground underline-offset-4 hover:underline">
-        返回訂單（需已登入）
-      </Link>
     </main>
   );
 }
