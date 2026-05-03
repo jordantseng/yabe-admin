@@ -1,5 +1,10 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type QueryClient,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import {
   CheckIcon,
   EyeIcon,
@@ -50,12 +55,16 @@ import {
   settlePackageByNumber,
   updatePackageInternationalShippingFeeByNumber,
 } from "@/lib/packages";
-import { packagesListSearchParams } from "@/lib/packages-list-url";
+import {
+  packagesListSearchParams,
+  type PackagesListUrlState,
+} from "@/lib/packages-list-url";
 import {
   fetchOrdersForPackagePage,
   packageNumberLabelFromOrderRow,
   revenueStringFromCostPrice,
   updateOrderFields,
+  type OrderListFieldsPatch,
   type OrderWithPackageNumber,
   type PackagePageEmptyPackageStub,
 } from "@/lib/orders";
@@ -197,11 +206,129 @@ function mergePackageTableGroups(
   return labels.map((label) => byLabel.get(label)!);
 }
 
+type PackageRowsQueryData = {
+  rows: PackageTableRow[];
+  count: number;
+  emptyPackageStubs: PackagePageEmptyPackageStub[];
+};
+
+function packageRowsQueryKey(listUrl: PackagesListUrlState) {
+  return [
+    PACKAGE_ROWS_QUERY_KEY,
+    listUrl.q,
+    listUrl.pkg,
+    listUrl.product,
+    listUrl.payer,
+    listUrl.page,
+  ] as const;
+}
+
+function applyPackageRowPatch(
+  row: PackageTableRow,
+  patch: OrderListFieldsPatch,
+): PackageTableRow {
+  const next = { ...row };
+  if (patch.payer !== undefined) next.payer = patch.payer;
+  if (patch.paymentStatus !== undefined) {
+    next.paymentStatus = patch.paymentStatus;
+  }
+  if (patch.productStatus !== undefined) {
+    next.productStatus = patch.productStatus;
+  }
+  if (patch.packageNumber !== undefined) {
+    next.packageNumber = patch.packageNumber.trim();
+  }
+  return next;
+}
+
+function packageRowPatchIsNoOp(
+  row: PackageTableRow,
+  patch: OrderListFieldsPatch,
+): boolean {
+  if (patch.payer !== undefined && patch.payer !== row.payer) return false;
+  if (
+    patch.paymentStatus !== undefined &&
+    patch.paymentStatus !== row.paymentStatus
+  ) {
+    return false;
+  }
+  if (
+    patch.productStatus !== undefined &&
+    patch.productStatus !== row.productStatus
+  ) {
+    return false;
+  }
+  if (patch.packageNumber !== undefined) {
+    if (patch.packageNumber.trim() !== row.packageNumber) return false;
+  }
+  return true;
+}
+
+async function syncPackageRowsCache(
+  queryClient: QueryClient,
+  listUrl: PackagesListUrlState,
+) {
+  const res = await fetchOrdersForPackagePage({
+    itemSearch: listUrl.q,
+    packageFilter: listUrl.pkg,
+    productStatus: listUrl.product,
+    payer: listUrl.payer,
+    page: listUrl.page,
+    packagesPerPage: PACKAGE_GROUPS_PER_PAGE,
+  });
+  if (res.error) return;
+  queryClient.setQueryData<PackageRowsQueryData>(packageRowsQueryKey(listUrl), {
+    rows: (res.data ?? []).map(orderToPackageTableRow),
+    count: res.count,
+    emptyPackageStubs: res.emptyPackageStubs,
+  });
+}
+
+async function runBulkPackagePageProductStatusUpdates(
+  queryClient: QueryClient,
+  listUrl: PackagesListUrlState,
+  updatableIds: string[],
+  productStatus: PackageTableRow["productStatus"],
+): Promise<{ ok: true } | { ok: false; message: string }> {
+  await queryClient.cancelQueries({ queryKey: [PACKAGE_ROWS_QUERY_KEY] });
+  const previousEntries = queryClient.getQueriesData<PackageRowsQueryData>({
+    queryKey: [PACKAGE_ROWS_QUERY_KEY],
+  });
+  const idSet = new Set(updatableIds);
+  const optimisticPatch: OrderListFieldsPatch = { productStatus };
+  queryClient.setQueriesData<PackageRowsQueryData>(
+    { queryKey: [PACKAGE_ROWS_QUERY_KEY] },
+    (old) => {
+      if (!old) return old;
+      return {
+        ...old,
+        rows: old.rows.map((row) =>
+          idSet.has(row.id) ? applyPackageRowPatch(row, optimisticPatch) : row,
+        ),
+      };
+    },
+  );
+  const results = await Promise.all(
+    updatableIds.map((id) => updateOrderFields(id, { productStatus })),
+  );
+  const failed = results.find((r) => r.error);
+  if (failed?.error) {
+    for (const [key, data] of previousEntries) {
+      queryClient.setQueryData(key, data);
+    }
+    return { ok: false, message: failed.error.message };
+  }
+  await syncPackageRowsCache(queryClient, listUrl);
+  return { ok: true };
+}
+
 function PackagePage() {
   const queryClient = useQueryClient();
   const [listUrl, setListUrl] = useQueryStates(packagesListSearchParams, {
     history: "push",
   });
+  const listUrlRef = useRef(listUrl);
+  listUrlRef.current = listUrl;
   const [isCreatePackageDialogOpen, setIsCreatePackageDialogOpen] =
     useState(false);
   const [newPackageNotes, setNewPackageNotes] = useState("");
@@ -244,14 +371,7 @@ function PackagePage() {
   const [packageToSettle, setPackageToSettle] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const rowsQuery = useQuery({
-    queryKey: [
-      PACKAGE_ROWS_QUERY_KEY,
-      listUrl.q,
-      listUrl.pkg,
-      listUrl.product,
-      listUrl.payer,
-      listUrl.page,
-    ],
+    queryKey: packageRowsQueryKey(listUrl),
     queryFn: async () => {
       const res = await fetchOrdersForPackagePage({
         itemSearch: listUrl.q,
@@ -299,19 +419,16 @@ function PackagePage() {
     enabled: isCreatePackageDialogOpen,
   });
 
-  const invalidatePackageRows = () => {
-    void queryClient.invalidateQueries({ queryKey: [PACKAGE_ROWS_QUERY_KEY] });
-  };
   const createPackageMutation = useMutation({
     mutationFn: createPackage,
-    onSuccess: () => {
+    onSuccess: async () => {
       void queryClient.invalidateQueries({
         queryKey: PACKAGE_NUMBERS_QUERY_KEY,
       });
       void queryClient.invalidateQueries({
         queryKey: PACKAGE_NEXT_NUMBER_QUERY_KEY,
       });
-      invalidatePackageRows();
+      await syncPackageRowsCache(queryClient, listUrlRef.current);
     },
   });
   const updateOrderFieldMutation = useMutation({
@@ -322,7 +439,36 @@ function PackagePage() {
       const { error } = await updateOrderFields(args.id, args.patch);
       if (error) throw new Error(error.message);
     },
-    onSuccess: () => invalidatePackageRows(),
+    onMutate: async ({ id, patch }) => {
+      await queryClient.cancelQueries({ queryKey: [PACKAGE_ROWS_QUERY_KEY] });
+      const previousEntries = queryClient.getQueriesData<PackageRowsQueryData>({
+        queryKey: [PACKAGE_ROWS_QUERY_KEY],
+      });
+      queryClient.setQueriesData<PackageRowsQueryData>(
+        { queryKey: [PACKAGE_ROWS_QUERY_KEY] },
+        (old) => {
+          if (!old) return old;
+          return {
+            ...old,
+            rows: old.rows.map((row) =>
+              row.id === id ? applyPackageRowPatch(row, patch) : row,
+            ),
+          };
+        },
+      );
+      return { previousEntries };
+    },
+    onError: (error, _variables, context) => {
+      if (context?.previousEntries) {
+        for (const [key, data] of context.previousEntries) {
+          queryClient.setQueryData(key, data);
+        }
+      }
+      setRowFieldError(error.message);
+    },
+    onSuccess: async () => {
+      await syncPackageRowsCache(queryClient, listUrlRef.current);
+    },
   });
   const editPackageFeeMutation = useMutation({
     mutationFn: async (args: { pkg: string; fee: number; notes: string }) => {
@@ -333,14 +479,18 @@ function PackagePage() {
       );
       if (error) throw new Error(error.message);
     },
-    onSuccess: () => invalidatePackageRows(),
+    onSuccess: async () => {
+      await syncPackageRowsCache(queryClient, listUrlRef.current);
+    },
   });
   const settlePackageMutation = useMutation({
     mutationFn: async (pkg: string) => {
       const { error } = await settlePackageByNumber(pkg);
       if (error) throw new Error(error.message);
     },
-    onSuccess: () => invalidatePackageRows(),
+    onSuccess: async () => {
+      await syncPackageRowsCache(queryClient, listUrlRef.current);
+    },
   });
 
   useEffect(() => {
@@ -390,7 +540,8 @@ function PackagePage() {
   const emptyPackageStubs = rowsQuery.data?.emptyPackageStubs ?? [];
   const packageNumberOptions =
     packageNumbersQuery.data ?? EMPTY_PACKAGE_NUMBERS;
-  const rowsLoading = rowsQuery.isLoading;
+  /** 換頁、篩選、搜尋時顯示 skeleton；欄位更新改以樂觀更新 + 手動 sync，不觸發列表 query 的 refetch */
+  const rowsLoading = rowsQuery.isFetching;
   const rowsError = (rowsQuery.error as Error | null)?.message ?? null;
   const hasOrderFilters =
     listUrl.q.trim() !== "" ||
@@ -458,7 +609,13 @@ function PackagePage() {
 
   const handlePackageNumberChange = (id: string, value: string | null) => {
     const target = rows.find((row) => row.id === id);
-    if (target?.packageSettled) {
+    if (!target || target.packageSettled) {
+      return;
+    }
+    if (
+      value &&
+      packageRowPatchIsNoOp(target, { packageNumber: value })
+    ) {
       return;
     }
     if (value) {
@@ -487,6 +644,18 @@ function PackagePage() {
     }
     if (value === "已出貨" && target.paymentStatus !== "已入帳") {
       setRowFieldError("收款狀態尚未入帳，不能將商品狀態改為已出貨");
+      return;
+    }
+    if (
+      value != null &&
+      (value === "未購買" ||
+        value === "已購買" ||
+        value === "到虹家" ||
+        value === "集運回台" ||
+        value === "到台灣" ||
+        value === "已出貨") &&
+      packageRowPatchIsNoOp(target, { productStatus: value })
+    ) {
       return;
     }
     if (
@@ -566,14 +735,33 @@ function PackagePage() {
       }
       return;
     }
-    const results = await Promise.all(
-      updatableIds.map((id) =>
-        updateOrderFields(id, { productStatus: bulkProductStatus })
-      )
+    const needUpdateIds = updatableIds.filter((id) => {
+      const row = orderById.get(id);
+      return row != null && row.productStatus !== bulkProductStatus;
+    });
+    if (needUpdateIds.length === 0) {
+      if (lockedIds.length > 0 || paymentBlockedIds.length > 0) {
+        setRowFieldError(
+          "部分訂單未變更商品狀態（已出貨、包裹已結清，或收款未入帳時不可改為已出貨）",
+        );
+      } else {
+        setRowFieldError(null);
+      }
+      const skippedIds = Array.from(
+        new Set([...lockedIds, ...paymentBlockedIds]),
+      );
+      setSelectedOrderIds(skippedIds);
+      setIsBulkProductPopoverOpen(false);
+      return;
+    }
+    const bulkResult = await runBulkPackagePageProductStatusUpdates(
+      queryClient,
+      listUrlRef.current,
+      needUpdateIds,
+      bulkProductStatus,
     );
-    const failed = results.find((r) => r.error);
-    if (failed?.error) {
-      setRowFieldError(failed.error.message);
+    if (bulkResult.ok === false) {
+      setRowFieldError(bulkResult.message);
       return;
     }
     if (lockedIds.length > 0 || paymentBlockedIds.length > 0) {
@@ -584,7 +772,6 @@ function PackagePage() {
     const skippedIds = Array.from(new Set([...lockedIds, ...paymentBlockedIds]));
     setSelectedOrderIds(skippedIds);
     setIsBulkProductPopoverOpen(false);
-    invalidatePackageRows();
   };
 
   const handleCreatePackage = async () => {
