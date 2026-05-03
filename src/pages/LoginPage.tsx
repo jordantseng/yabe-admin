@@ -44,11 +44,7 @@ function LoginPage() {
       <div className="w-full max-w-sm space-y-6">
         <div>
           <h1 className="text-xl font-semibold">登入</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            使用 Supabase 帳號登入後台。
-          </p>
         </div>
-
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-1">
             <label htmlFor="login-email" className="text-sm font-medium">
