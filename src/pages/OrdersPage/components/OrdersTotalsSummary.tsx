@@ -5,7 +5,11 @@ import { type OrdersListUrlState } from "@/lib/orders-list-url";
 
 const ORDERS_TOTALS_QUERY_KEY = ["orders", "totals"] as const;
 
-export function OrdersTotalsSummary({ listUrl }: { listUrl: OrdersListUrlState }) {
+type OrdersTotalsSummaryProps = {
+  listUrl: OrdersListUrlState;
+};
+
+function OrdersTotalsSummary({ listUrl }: OrdersTotalsSummaryProps) {
   const totalsQuery = useQuery({
     queryKey: [
       ...ORDERS_TOTALS_QUERY_KEY,
@@ -58,7 +62,8 @@ export function OrdersTotalsSummary({ listUrl }: { listUrl: OrdersListUrlState }
   return (
     <div className="flex flex-wrap items-center gap-4 text-sm">
       <p>
-        總成本: <span className="font-semibold">{totalCost.toLocaleString()}</span>
+        總成本:{" "}
+        <span className="font-semibold">{totalCost.toLocaleString()}</span>
       </p>
       <p>
         總收益:{" "}
@@ -68,3 +73,4 @@ export function OrdersTotalsSummary({ listUrl }: { listUrl: OrdersListUrlState }
   );
 }
 
+export default OrdersTotalsSummary;

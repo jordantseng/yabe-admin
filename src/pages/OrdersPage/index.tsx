@@ -59,7 +59,7 @@ import {
   type OrdersListUrlState,
 } from "@/lib/orders-list-url";
 import { fetchPackageNumbersFromDb } from "@/lib/packages";
-import { OrdersTotalsSummary } from "@/pages/OrdersPage/components/OrdersTotalsSummary";
+import OrdersTotalsSummary from "@/pages/OrdersPage/components/OrdersTotalsSummary";
 
 const ORDERS_PAGE_SIZE = 12;
 const ORDERS_QUERY_KEY = ["orders", "list"] as const;
@@ -473,8 +473,7 @@ function OrdersPage() {
   const totalRowCount = ordersQuery.data?.count ?? 0;
   /** 換頁、篩選、搜尋或資料重抓時顯示 skeleton（含 isLoading 的首次載入） */
   const ordersLoading = ordersQuery.isFetching || ordersQuery.isLoading;
-  const ordersError =
-    (ordersQuery.error as Error | null)?.message ?? null;
+  const ordersError = (ordersQuery.error as Error | null)?.message ?? null;
 
   const totalPages = Math.max(1, Math.ceil(totalRowCount / ORDERS_PAGE_SIZE));
   const safeCurrentPage = Math.min(listUrl.page, totalPages);
