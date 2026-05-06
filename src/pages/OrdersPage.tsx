@@ -19,8 +19,8 @@ import { CreateOrderDialog } from "@/components/orders/CreateOrderDialog";
 import OrdersTotalsSummary from "@/components/orders/OrdersTotalsSummary";
 import { DeleteOrderDialog } from "@/components/orders/DeleteOrderDialog";
 import { Pagination } from "@/components/Pagination";
+import { SearchBar } from "@/components/SearchBar";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Popover,
@@ -225,7 +225,7 @@ function OrdersPage() {
     "未購買" | "已購買" | "到虹家" | "集運回台" | "到台灣" | "已出貨"
   >("未購買");
   const queryClient = useQueryClient();
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  // Search input is owned by `SearchBar`.
 
   const ordersQuery = useQuery({
     queryKey: [...ORDERS_QUERY_KEY, listUrl],
@@ -376,9 +376,9 @@ function OrdersPage() {
     });
     setIsFilterPopoverOpen(false);
   };
-  const applySearch = () => {
+  const applySearch = (value: string) => {
     patchListUrl({
-      q: (searchInputRef.current?.value ?? "").trim(),
+      q: value.trim(),
       page: 1,
     });
   };
@@ -686,25 +686,12 @@ function OrdersPage() {
       </div>
 
       <div className="mb-4 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Input
-            ref={searchInputRef}
-            key={listUrl.q}
-            defaultValue={listUrl.q}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                applySearch();
-              }
-            }}
-            placeholder="搜尋品項"
-            aria-label="搜尋品項，按 Enter 查詢"
-            className="w-full max-w-sm"
-          />
-          <Button type="button" variant="outline" onClick={applySearch}>
-            搜尋
-          </Button>
-        </div>
+        <SearchBar
+          defaultValue={listUrl.q}
+          placeholder="搜尋品項"
+          ariaLabel="搜尋品項"
+          onSearch={(value) => applySearch(value)}
+        />
         <div className="flex items-center gap-2">
           <Popover
             open={isFilterPopoverOpen}

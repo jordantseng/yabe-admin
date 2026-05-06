@@ -16,6 +16,7 @@ import {
 import { useQueryStates } from "nuqs";
 import { Link } from "react-router-dom";
 import { Pagination } from "@/components/Pagination";
+import { SearchBar } from "@/components/SearchBar";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -370,7 +371,7 @@ function PackagePage() {
   const [isSettlePackageDialogOpen, setIsSettlePackageDialogOpen] =
     useState(false);
   const [packageToSettle, setPackageToSettle] = useState<string | null>(null);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  // Search input is owned by `SearchBar`.
   const rowsQuery = useQuery({
     queryKey: packageRowsQueryKey(listUrl),
     queryFn: async () => {
@@ -531,9 +532,9 @@ function PackagePage() {
   ) => {
     void setListUrl(patch);
   };
-  const applySearch = () => {
+  const applySearch = (value: string) => {
     patchListUrl({
-      q: (searchInputRef.current?.value ?? "").trim(),
+      q: value.trim(),
       page: 1,
     });
   };
@@ -975,25 +976,12 @@ function PackagePage() {
       </div>
 
       <div className="mb-2 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Input
-            ref={searchInputRef}
-            key={listUrl.q}
-            defaultValue={listUrl.q}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                applySearch();
-              }
-            }}
-            placeholder="搜尋品項"
-            aria-label="搜尋品項，按 Enter 查詢"
-            className="w-full max-w-sm"
-          />
-          <Button type="button" variant="outline" onClick={applySearch}>
-            搜尋
-          </Button>
-        </div>
+        <SearchBar
+          defaultValue={listUrl.q}
+          placeholder="搜尋品項"
+          ariaLabel="搜尋品項"
+          onSearch={(value) => applySearch(value)}
+        />
 
         <div className="flex items-center gap-2">
         <Popover
