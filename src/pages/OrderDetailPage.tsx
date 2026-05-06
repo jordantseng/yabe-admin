@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Controller, useForm } from "react-hook-form";
 import { XIcon } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Button } from "@/components/ui/button";
+import Button from "@/components/ui/button";
 import {
   fetchOrderById,
   orderRecordToDetailForm,

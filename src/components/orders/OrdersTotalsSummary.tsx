@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Skeleton } from "@/components/ui/skeleton";
+import Skeleton from "@/components/ui/skeleton";
 import { fetchOrdersTotals } from "@/lib/orders";
 import { type OrdersListUrlState } from "@/lib/orders-list-url";
 
@@ -9,7 +9,7 @@ type OrdersTotalsSummaryProps = {
   listUrl: OrdersListUrlState;
 };
 
-function OrdersTotalsSummary({ listUrl }: OrdersTotalsSummaryProps) {
+export default function OrdersTotalsSummary({ listUrl }: OrdersTotalsSummaryProps) {
   const totalsQuery = useQuery({
     queryKey: [
       ...ORDERS_TOTALS_QUERY_KEY,
@@ -72,5 +72,3 @@ function OrdersTotalsSummary({ listUrl }: OrdersTotalsSummaryProps) {
     </div>
   );
 }
-
-export default OrdersTotalsSummary;

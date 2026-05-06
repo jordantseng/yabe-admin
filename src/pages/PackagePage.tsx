@@ -15,9 +15,9 @@ import {
 } from "lucide-react";
 import { useQueryStates } from "nuqs";
 import { Link } from "react-router-dom";
-import { Pagination } from "@/components/Pagination";
-import { SearchBar } from "@/components/SearchBar";
-import { Button } from "@/components/ui/button";
+import Pagination from "@/components/Pagination";
+import SearchBar from "@/components/SearchBar";
+import Button from "@/components/ui/button";
 import {
   Dialog,
   DialogClose,
@@ -28,8 +28,8 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
+import Input from "@/components/ui/input";
+import Skeleton from "@/components/ui/skeleton";
 import {
   Popover,
   PopoverContent,

@@ -1,4 +1,4 @@
-import { Button } from "@/components/ui/button";
+import Button from "@/components/ui/button";
 import {
   Dialog,
   DialogClose,
@@ -17,7 +17,7 @@ type DeleteOrderDialogProps = {
   onConfirm: () => void;
 };
 
-export function DeleteOrderDialog({
+export default function DeleteOrderDialog({
   open,
   onOpenChange,
   error,

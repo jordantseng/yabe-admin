@@ -8,7 +8,7 @@ import {
 /**
  * 邀請進站且尚未寫入 user_metadata.password_configured 時，僅允許 `/set-password`。
  */
-export function RequirePasswordSetup() {
+export default function RequirePasswordSetup() {
   const { user, loading } = useAuth();
   const location = useLocation();
 

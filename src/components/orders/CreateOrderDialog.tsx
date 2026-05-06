@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Controller, useForm } from "react-hook-form";
-import { Button } from "@/components/ui/button";
+import Button from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   Dialog,
@@ -12,7 +12,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import Input from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -41,7 +41,7 @@ type CreateOrderDialogProps = {
   onOpenChange: (open: boolean) => void;
 };
 
-export function CreateOrderDialog({
+export default function CreateOrderDialog({
   open,
   onOpenChange,
 }: CreateOrderDialogProps) {

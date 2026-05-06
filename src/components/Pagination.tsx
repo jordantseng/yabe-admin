@@ -1,7 +1,7 @@
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import Button from "@/components/ui/button";
+import Skeleton from "@/components/ui/skeleton";
 
-export function Pagination({
+export default function Pagination({
   loading,
   currentPage,
   totalPages,

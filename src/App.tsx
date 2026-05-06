@@ -1,8 +1,8 @@
 import { Navigate, Route, Routes } from "react-router-dom";
-import { AppLayout } from "@/components/AppLayout";
-import { GuestRoute } from "@/components/GuestRoute";
-import { ProtectedRoute } from "@/components/ProtectedRoute";
-import { RequirePasswordSetup } from "@/components/RequirePasswordSetup";
+import AppLayout from "@/components/AppLayout";
+import GuestRoute from "@/components/GuestRoute";
+import ProtectedRoute from "@/components/ProtectedRoute";
+import RequirePasswordSetup from "@/components/RequirePasswordSetup";
 import LoginPage from "@/pages/LoginPage";
 import OrderDetailPage from "@/pages/OrderDetailPage";
 import OrdersPage from "@/pages/OrdersPage";

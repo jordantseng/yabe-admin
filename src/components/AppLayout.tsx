@@ -5,12 +5,12 @@ import {
   NavigationMenuList,
   navigationMenuTriggerStyle,
 } from "@/components/ui/navigation-menu";
-import { Button } from "@/components/ui/button";
+import Button from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/auth/useAuth";
 import logo from "@/assets/logo.png";
 
-export function AppLayout() {
+export default function AppLayout() {
   const { signOut, user } = useAuth();
 
   return (

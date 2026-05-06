@@ -15,13 +15,13 @@ import {
 } from "lucide-react";
 import { useQueryStates } from "nuqs";
 import { Link } from "react-router-dom";
-import { CreateOrderDialog } from "@/components/orders/CreateOrderDialog";
+import CreateOrderDialog from "@/components/orders/CreateOrderDialog";
 import OrdersTotalsSummary from "@/components/orders/OrdersTotalsSummary";
-import { DeleteOrderDialog } from "@/components/orders/DeleteOrderDialog";
-import { Pagination } from "@/components/Pagination";
-import { SearchBar } from "@/components/SearchBar";
-import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
+import DeleteOrderDialog from "@/components/orders/DeleteOrderDialog";
+import Pagination from "@/components/Pagination";
+import SearchBar from "@/components/SearchBar";
+import Button from "@/components/ui/button";
+import Skeleton from "@/components/ui/skeleton";
 import {
   Popover,
   PopoverContent,
