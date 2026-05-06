@@ -43,11 +43,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  deleteOrderById,
   fetchOrders,
   fetchOrdersTotals,
-  orderRecordToTableRow,
   updateOrderFields,
+  deleteOrderById,
+  orderRecordToTableRow,
   type OrderListFieldsPatch,
   type OrdersTableRow,
 } from "@/lib/orders";
@@ -120,30 +120,27 @@ async function syncOrdersListViewCache(
     page: listUrl.page,
     pageSize: ORDERS_PAGE_SIZE,
   });
-  if (!listRes.error) {
-    queryClient.setQueryData<OrdersListQueryData>([...ORDERS_QUERY_KEY, listUrl], {
-      rows: (listRes.data ?? []).map(orderRecordToTableRow),
-      count: listRes.count,
-    });
-  }
+  queryClient.setQueryData<OrdersListQueryData>([...ORDERS_QUERY_KEY, listUrl], {
+    rows: (listRes.data ?? []).map(orderRecordToTableRow),
+    count: listRes.count,
+  });
+
   const totalsRes = await fetchOrdersTotals({
     itemSearch: listUrl.q || undefined,
     paymentStatus: listUrl.payment,
     productStatus: listUrl.product,
     packageNumber: listUrl.pkg,
   });
-  if (!totalsRes.error) {
-    queryClient.setQueryData(
-      [
-        ...ORDERS_TOTALS_QUERY_KEY,
-        listUrl.q,
-        listUrl.payment,
-        listUrl.product,
-        listUrl.pkg,
-      ],
-      { totalCost: totalsRes.totalCost, totalProfit: totalsRes.totalProfit }
-    );
-  }
+  queryClient.setQueryData(
+    [
+      ...ORDERS_TOTALS_QUERY_KEY,
+      listUrl.q,
+      listUrl.payment,
+      listUrl.product,
+      listUrl.pkg,
+    ],
+    { totalCost: totalsRes.totalCost, totalProfit: totalsRes.totalProfit }
+  );
 }
 
 async function runBulkOrderFieldUpdates(
@@ -151,7 +148,7 @@ async function runBulkOrderFieldUpdates(
   listUrl: OrdersListUrlState,
   updatableIds: string[],
   optimisticPatch: OrderListFieldsPatch,
-  mutateOne: (id: string) => Promise<{ error: { message: string } | null }>
+  mutateOne: (id: string) => Promise<void>
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   await queryClient.cancelQueries({ queryKey: ORDERS_QUERY_KEY });
   const previousEntries = queryClient.getQueriesData<OrdersListQueryData>({
@@ -170,13 +167,13 @@ async function runBulkOrderFieldUpdates(
       };
     }
   );
-  const results = await Promise.all(updatableIds.map((id) => mutateOne(id)));
-  const failed = results.find((r) => r.error);
-  if (failed?.error) {
+  try {
+    await Promise.all(updatableIds.map((id) => mutateOne(id)));
+  } catch (error) {
     for (const [key, data] of previousEntries) {
       queryClient.setQueryData(key, data);
     }
-    return { ok: false, message: failed.error.message };
+    return { ok: false, message: (error as Error).message };
   }
   await syncOrdersListViewCache(queryClient, listUrl);
   return { ok: true };
@@ -221,9 +218,6 @@ function OrdersPage() {
         page: listUrl.page,
         pageSize: ORDERS_PAGE_SIZE,
       });
-      if (res.error) {
-        throw new Error(res.error.message);
-      }
       return {
         rows: (res.data ?? []).map(orderRecordToTableRow),
         count: res.count,
@@ -238,10 +232,7 @@ function OrdersPage() {
     queryKey: PACKAGE_NUMBERS_QUERY_KEY,
     queryFn: async () => {
       const res = await fetchPackageNumbersFromDb();
-      if (res.error) {
-        throw new Error(res.error.message);
-      }
-      return res.data ?? [];
+      return res.data;
     },
   });
 
@@ -266,8 +257,7 @@ function OrdersPage() {
       orderId: string;
       patch: Parameters<typeof updateOrderFields>[1];
     }) => {
-      const { error } = await updateOrderFields(orderId, patch);
-      if (error) throw new Error(error.message);
+      await updateOrderFields(orderId, patch);
     },
     onMutate: async ({ orderId, patch }) => {
       await queryClient.cancelQueries({ queryKey: ORDERS_QUERY_KEY });
@@ -303,8 +293,7 @@ function OrdersPage() {
 
   const deleteOrderMutation = useMutation({
     mutationFn: async (orderId: string) => {
-      const { error } = await deleteOrderById(orderId);
-      if (error) throw new Error(error.message);
+      await deleteOrderById(orderId);
     },
     onSuccess: () => {
       invalidateOrdersData();

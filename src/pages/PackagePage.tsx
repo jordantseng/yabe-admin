@@ -270,20 +270,26 @@ async function syncPackageRowsCache(
   queryClient: QueryClient,
   listUrl: PackagesListUrlState,
 ) {
-  const res = await fetchOrdersForPackagePage({
-    itemSearch: listUrl.q,
-    packageFilter: listUrl.pkg,
-    productStatus: listUrl.product,
-    payer: listUrl.payer,
-    page: listUrl.page,
-    packagesPerPage: PACKAGE_GROUPS_PER_PAGE,
-  });
-  if (res.error) return;
-  queryClient.setQueryData<PackageRowsQueryData>(packageRowsQueryKey(listUrl), {
-    rows: (res.data ?? []).map(orderToPackageTableRow),
-    count: res.count,
-    emptyPackageStubs: res.emptyPackageStubs,
-  });
+  try {
+    const res = await fetchOrdersForPackagePage({
+      itemSearch: listUrl.q,
+      packageFilter: listUrl.pkg,
+      productStatus: listUrl.product,
+      payer: listUrl.payer,
+      page: listUrl.page,
+      packagesPerPage: PACKAGE_GROUPS_PER_PAGE,
+    });
+    queryClient.setQueryData<PackageRowsQueryData>(
+      packageRowsQueryKey(listUrl),
+      {
+        rows: (res.data ?? []).map(orderToPackageTableRow),
+        count: res.count,
+        emptyPackageStubs: res.emptyPackageStubs,
+      },
+    );
+  } catch {
+    // best-effort cache sync; ignore
+  }
 }
 
 async function runBulkPackagePageProductStatusUpdates(
@@ -310,15 +316,17 @@ async function runBulkPackagePageProductStatusUpdates(
       };
     },
   );
-  const results = await Promise.all(
-    updatableIds.map((id) => updateOrderFields(id, { productStatus })),
-  );
-  const failed = results.find((r) => r.error);
-  if (failed?.error) {
+  try {
+    await Promise.all(
+      updatableIds.map((id) =>
+        updateOrderFields(id, { productStatus }),
+      ),
+    );
+  } catch (error) {
     for (const [key, data] of previousEntries) {
       queryClient.setQueryData(key, data);
     }
-    return { ok: false, message: failed.error.message };
+    return { ok: false, message: (error as Error).message };
   }
   await syncPackageRowsCache(queryClient, listUrl);
   return { ok: true };
@@ -383,9 +391,6 @@ function PackagePage() {
         page: listUrl.page,
         packagesPerPage: PACKAGE_GROUPS_PER_PAGE,
       });
-      if (res.error) {
-        throw new Error(res.error.message);
-      }
       return {
         rows: (res.data ?? []).map(orderToPackageTableRow),
         count: res.count,
@@ -399,10 +404,7 @@ function PackagePage() {
     queryKey: PACKAGE_NUMBERS_QUERY_KEY,
     queryFn: async () => {
       const res = await fetchPackageNumbersFromDb();
-      if (res.error) {
-        throw new Error(res.error.message);
-      }
-      return res.data ?? [];
+      return res.data;
     },
   });
 
@@ -410,9 +412,6 @@ function PackagePage() {
     queryKey: PACKAGE_NEXT_NUMBER_QUERY_KEY,
     queryFn: async () => {
       const res = await peekNextPackageNumber();
-      if (res.error) {
-        throw new Error(res.error.message);
-      }
       if (res.data == null) {
         throw new Error("無法取得下一個包裹編號");
       }
@@ -438,8 +437,7 @@ function PackagePage() {
       id: string;
       patch: Parameters<typeof updateOrderFields>[1];
     }) => {
-      const { error } = await updateOrderFields(args.id, args.patch);
-      if (error) throw new Error(error.message);
+      await updateOrderFields(args.id, args.patch);
     },
     onMutate: async ({ id, patch }) => {
       await queryClient.cancelQueries({ queryKey: [PACKAGE_ROWS_QUERY_KEY] });
@@ -474,12 +472,11 @@ function PackagePage() {
   });
   const editPackageFeeMutation = useMutation({
     mutationFn: async (args: { pkg: string; fee: number; notes: string }) => {
-      const { error } = await updatePackageInternationalShippingFeeByNumber(
+      await updatePackageInternationalShippingFeeByNumber(
         args.pkg,
         args.fee,
         args.notes,
       );
-      if (error) throw new Error(error.message);
     },
     onSuccess: async () => {
       await syncPackageRowsCache(queryClient, listUrlRef.current);
@@ -487,8 +484,7 @@ function PackagePage() {
   });
   const settlePackageMutation = useMutation({
     mutationFn: async (pkg: string) => {
-      const { error } = await settlePackageByNumber(pkg);
-      if (error) throw new Error(error.message);
+      await settlePackageByNumber(pkg);
     },
     onSuccess: async () => {
       await syncPackageRowsCache(queryClient, listUrlRef.current);
@@ -778,18 +774,15 @@ function PackagePage() {
 
   const handleCreatePackage = async () => {
     setCreatePackageError(null);
-    const { data, error } = await createPackageMutation.mutateAsync({
-      notes: newPackageNotes.trim() || null,
-      internationalShippingFee: Number.parseFloat(
-        newPackageInternationalShippingFee
-      ),
-    });
-    if (error) {
-      setCreatePackageError(error.message);
-      return;
-    }
-    if (!data) {
-      setCreatePackageError("新增失敗");
+    try {
+      await createPackageMutation.mutateAsync({
+        notes: newPackageNotes.trim() || null,
+        internationalShippingFee: Number.parseFloat(
+          newPackageInternationalShippingFee,
+        ),
+      });
+    } catch (error) {
+      setCreatePackageError((error as Error).message);
       return;
     }
     setNewPackageNotes("");

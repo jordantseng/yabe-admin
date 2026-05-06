@@ -25,9 +25,6 @@ export default function OrdersTotalsSummary({ listUrl }: OrdersTotalsSummaryProp
         productStatus: listUrl.product,
         packageNumber: listUrl.pkg,
       });
-      if (res.error) {
-        throw new Error(res.error.message);
-      }
       return { totalCost: res.totalCost, totalProfit: res.totalProfit };
     },
     placeholderData: (previousData) => previousData,

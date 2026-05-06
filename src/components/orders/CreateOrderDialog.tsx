@@ -87,10 +87,7 @@ export default function CreateOrderDialog({
     queryKey: ["packages", "numbers"],
     queryFn: async () => {
       const res = await fetchPackageNumbersFromDb();
-      if (res.error) {
-        throw new Error(res.error.message);
-      }
-      return res.data ?? [];
+      return res.data;
     },
     placeholderData: (previousData) => previousData,
   });

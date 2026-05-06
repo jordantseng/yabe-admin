@@ -80,10 +80,7 @@ function OrderDetailPage() {
     queryKey: PACKAGE_NUMBERS_QUERY_KEY,
     queryFn: async () => {
       const res = await fetchPackageNumbersFromDb();
-      if (res.error) {
-        throw new Error(res.error.message);
-      }
-      return res.data ?? [];
+      return res.data;
     },
   });
 
@@ -122,17 +119,24 @@ function OrderDetailPage() {
     setIsLoading(true);
 
     (async () => {
-      const { data, error } = await fetchOrderById(orderId);
-      if (cancelled) {
-        return;
-      }
-      setIsLoading(false);
-      if (error) {
-        setLoadError(error.message);
+      let data: Awaited<ReturnType<typeof fetchOrderById>>["data"];
+      try {
+        const res = await fetchOrderById(orderId);
+        data = res.data;
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setIsLoading(false);
+        setLoadError((error as Error).message);
         setIsPersistedShippedLocked(false);
         reset(emptyOrderDetailForm());
         return;
       }
+      if (cancelled) {
+        return;
+      }
+      setIsLoading(false);
       if (!data) {
         setLoadError("找不到此訂單");
         setIsPersistedShippedLocked(false);

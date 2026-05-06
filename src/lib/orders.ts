@@ -177,7 +177,6 @@ function applyOrderListFilters(query: any, options: FetchOrdersOptions) {
 export type FetchOrdersTotalsResult = {
   totalCost: number;
   totalProfit: number;
-  error: { message: string } | null;
 };
 
 export async function fetchOrdersTotals(
@@ -187,9 +186,7 @@ export async function fetchOrdersTotals(
   query = applyOrderListFilters(query, options);
   const { data, error } = await query;
 
-  if (error) {
-    return { totalCost: 0, totalProfit: 0, error: { message: error.message } };
-  }
+  if (error) throw new Error(error.message);
 
   let totalCost = 0;
   let totalProfit = 0;
@@ -198,7 +195,7 @@ export async function fetchOrdersTotals(
     totalCost += Number.isNaN(c) ? 0 : c;
     totalProfit += revenueFromCostPrice(row.cost, row.price);
   }
-  return { totalCost, totalProfit, error: null };
+  return { totalCost, totalProfit };
 }
 
 export type CreateOrderInput = {
@@ -220,8 +217,7 @@ export type CreateOrderInput = {
 };
 
 export async function createOrder(input: CreateOrderInput): Promise<{
-  data: OrderRecord | null;
-  error: { message: string } | null;
+  data: OrderRecord;
 }> {
   const purchaseDate =
     input.purchaseDate.trim().slice(0, 10) ||
@@ -251,16 +247,15 @@ export async function createOrder(input: CreateOrderInput): Promise<{
     .select()
     .single();
 
-  if (error) return { data: null, error: { message: error.message } };
-  return { data: data as OrderRecord, error: null };
+  if (error) throw new Error(error.message);
+  return { data: data as OrderRecord };
 }
 
 export async function fetchOrders(
   options: FetchOrdersOptions = {},
 ): Promise<{
-  data: OrderRecord[] | null;
+  data: OrderRecord[];
   count: number;
-  error: { message: string } | null;
 }> {
   const sortDir = options.sortPurchaseDate ?? "desc";
   const ascending = sortDir === "asc";
@@ -278,11 +273,10 @@ export async function fetchOrders(
 
   const { data, error, count } = await query;
 
-  if (error) return { data: null, count: 0, error: { message: error.message } };
+  if (error) throw new Error(error.message);
   return {
     data: (data as OrderRecord[] | null) ?? [],
     count: count ?? 0,
-    error: null,
   };
 }
 
@@ -315,10 +309,9 @@ type PkgListRow = {
 export async function fetchOrdersForPackagePage(
   options: FetchOrdersForPackagePageOptions = {},
 ): Promise<{
-  data: OrderWithPackageNumber[] | null;
+  data: OrderWithPackageNumber[];
   count: number;
   emptyPackageStubs: PackagePageEmptyPackageStub[];
-  error: { message: string } | null;
 }> {
   const raw = options.packageFilter?.trim() ?? "全部";
   const pkgFilter = raw === "未指定" ? "全部" : raw;
@@ -329,12 +322,7 @@ export async function fetchOrdersForPackagePage(
     .from("packages")
     .select("id, number, notes, international_shipping_fee, is_settled, created_at");
   if (pkgsError) {
-    return {
-      data: null,
-      count: 0,
-      emptyPackageStubs: [],
-      error: { message: pkgsError.message },
-    };
+    throw new Error(pkgsError.message);
   }
 
   const pkgRows = ((pkgs ?? []) as PkgListRow[]).slice().sort((a, b) => {
@@ -347,8 +335,8 @@ export async function fetchOrdersForPackagePage(
   });
   const packageNumbers = new Set(pkgRows.map((p) => String(p.number)));
 
-  let pagePackages: PkgListRow[] = [];
-  let packageCountForPagination = 0;
+  let pagePackages: PkgListRow[];
+  let packageCountForPagination: number;
 
   if (pkgFilter === "全部") {
     packageCountForPagination = pkgRows.length;
@@ -392,7 +380,6 @@ export async function fetchOrdersForPackagePage(
       data: [],
       count: packageCountForPagination,
       emptyPackageStubs: emptyStubs,
-      error: null,
     };
   }
 
@@ -418,14 +405,7 @@ export async function fetchOrdersForPackagePage(
 
   const { data, error } = await query;
 
-  if (error) {
-    return {
-      data: null,
-      count: 0,
-      emptyPackageStubs: [],
-      error: { message: error.message },
-    };
-  }
+  if (error) throw new Error(error.message);
 
   const pageNumSet = new Set(pagePackages.map((p) => String(p.number)));
   const pageIdSet = new Set(pagePackages.map((p) => p.id));
@@ -474,7 +454,6 @@ export async function fetchOrdersForPackagePage(
     data: sorted,
     count: packageCountForPagination,
     emptyPackageStubs,
-    error: null,
   };
 }
 
@@ -488,7 +467,7 @@ export type OrderListFieldsPatch = {
 export async function updateOrderFields(
   orderId: string,
   patch: OrderListFieldsPatch,
-): Promise<{ error: { message: string } | null }> {
+): Promise<void> {
   const needsExistingStateCheck = patch.productStatus !== undefined;
   const needsProductStatusCheck = patch.productStatus === "已出貨";
   const isLockedFieldPatch =
@@ -501,18 +480,18 @@ export async function updateOrderFields(
       .select("product_status, payment_status")
       .eq("id", orderId)
       .single();
-    if (existingError) return { error: { message: existingError.message } };
+    if (existingError) throw new Error(existingError.message);
     if (existing?.product_status === "已出貨") {
       if (
         patch.productStatus !== undefined &&
         patch.productStatus !== existing.product_status
       ) {
-        return { error: { message: "商品狀態已出貨後不可再修改" } };
+        throw new Error("商品狀態已出貨後不可再修改");
       }
-      return { error: { message: "商品狀態已出貨，不能修改付款人、收款狀態或包裹編號" } };
+      throw new Error("商品狀態已出貨，不能修改付款人、收款狀態或包裹編號");
     }
     if (needsProductStatusCheck && existing?.payment_status !== "已入帳") {
-      return { error: { message: "收款狀態尚未入帳，不能將商品狀態改為已出貨" } };
+      throw new Error("收款狀態尚未入帳，不能將商品狀態改為已出貨");
     }
   }
 
@@ -534,8 +513,8 @@ export async function updateOrderFields(
           .select("id")
           .eq("number", asInt)
           .maybeSingle();
-        if (pkgErr) return { error: { message: pkgErr.message } };
-        if (!pkgRow) return { error: { message: `找不到包裹編號 ${packageNumber}` } };
+        if (pkgErr) throw new Error(pkgErr.message);
+        if (!pkgRow) throw new Error(`找不到包裹編號 ${packageNumber}`);
         row.package_id = pkgRow.id;
       } else {
         row.package_id = null;
@@ -543,11 +522,10 @@ export async function updateOrderFields(
     }
   }
 
-  if (Object.keys(row).length === 0) return { error: null };
+  if (Object.keys(row).length === 0) return;
 
   const { error } = await supabase.from("orders").update(row).eq("id", orderId);
-  if (error) return { error: { message: error.message } };
-  return { error: null };
+  if (error) throw new Error(error.message);
 }
 
 export async function updateOrderFromDetailForm(
@@ -645,16 +623,15 @@ export async function updateOrderFromDetailForm(
 }
 
 export async function deleteOrderById(orderId: string): Promise<{
-  error: { message: string } | null;
+  ok: true;
 }> {
   const { error } = await supabase.from("orders").delete().eq("id", orderId);
-  if (error) return { error: { message: error.message } };
-  return { error: null };
+  if (error) throw new Error(error.message);
+  return { ok: true };
 }
 
 export async function fetchOrderById(orderId: string): Promise<{
   data: OrderRecord | null;
-  error: { message: string } | null;
 }> {
   const { data, error } = await supabase
     .from("orders")
@@ -662,6 +639,6 @@ export async function fetchOrderById(orderId: string): Promise<{
     .eq("id", orderId)
     .maybeSingle();
 
-  if (error) return { data: null, error: { message: error.message } };
-  return { data: data as OrderRecord | null, error: null };
+  if (error) throw new Error(error.message);
+  return { data: data as OrderRecord | null };
 }
