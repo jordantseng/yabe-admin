@@ -201,7 +201,9 @@ function OrdersPage() {
     history: "push",
   });
   const listUrlRef = useRef(listUrl);
-  listUrlRef.current = listUrl;
+  useEffect(() => {
+    listUrlRef.current = listUrl;
+  }, [listUrl]);
   const [draftFilterPaymentStatus, setDraftFilterPaymentStatus] =
     useState<OrdersListUrlState["payment"]>("全部");
   const [draftFilterProductStatus, setDraftFilterProductStatus] =
@@ -285,12 +287,6 @@ function OrdersPage() {
       return res.data ?? [];
     },
   });
-
-  useEffect(() => {
-    setDraftFilterPaymentStatus(listUrl.payment);
-    setDraftFilterProductStatus(listUrl.product);
-    setDraftFilterPackageNumber(listUrl.pkg);
-  }, [listUrl.payment, listUrl.product, listUrl.pkg]);
 
   const invalidateOrdersData = () => {
     void queryClient.invalidateQueries({ queryKey: [ORDERS_QUERY_KEY] });
