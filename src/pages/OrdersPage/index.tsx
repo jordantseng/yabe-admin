@@ -20,6 +20,7 @@ import {
   type NewOrderDraft,
 } from "@/components/orders/CreateOrderDialog";
 import { DeleteOrderDialog } from "@/components/orders/DeleteOrderDialog";
+import { Pagination } from "@/components/Pagination";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -58,6 +59,7 @@ import {
   type OrdersListUrlState,
 } from "@/lib/orders-list-url";
 import { fetchPackageNumbersFromDb } from "@/lib/packages";
+import { OrdersTotalsSummary } from "@/pages/OrdersPage/components/OrdersTotalsSummary";
 
 const ORDERS_PAGE_SIZE = 12;
 const ORDERS_QUERY_KEY = ["orders", "list"] as const;
@@ -68,7 +70,7 @@ type OrdersListQueryData = { rows: OrdersTableRow[]; count: number };
 
 function applyOrderRowPatch(
   row: OrdersTableRow,
-  patch: OrderListFieldsPatch,
+  patch: OrderListFieldsPatch
 ): OrdersTableRow {
   const next = { ...row };
   if (patch.payer !== undefined) next.payer = patch.payer;
@@ -87,7 +89,7 @@ function applyOrderRowPatch(
 /** 若 patch 內每個有帶的欄位與列上值相同，則不需打 API */
 function patchHasNoEffectiveChange(
   row: OrdersTableRow,
-  patch: OrderListFieldsPatch,
+  patch: OrderListFieldsPatch
 ): boolean {
   if (patch.payer !== undefined && patch.payer !== row.payer) return false;
   if (
@@ -111,7 +113,7 @@ function patchHasNoEffectiveChange(
 /** 以 API 結果覆寫目前列表／合計快取，不觸發 invalidate（避免整表 skeleton） */
 async function syncOrdersListViewCache(
   queryClient: QueryClient,
-  listUrl: OrdersListUrlState,
+  listUrl: OrdersListUrlState
 ) {
   const listRes = await fetchOrders({
     itemSearch: listUrl.q || undefined,
@@ -143,7 +145,7 @@ async function syncOrdersListViewCache(
         listUrl.product,
         listUrl.pkg,
       ],
-      { totalCost: totalsRes.totalCost, totalProfit: totalsRes.totalProfit },
+      { totalCost: totalsRes.totalCost, totalProfit: totalsRes.totalProfit }
     );
   }
 }
@@ -153,9 +155,7 @@ async function runBulkOrderFieldUpdates(
   listUrl: OrdersListUrlState,
   updatableIds: string[],
   optimisticPatch: OrderListFieldsPatch,
-  mutateOne: (
-    id: string,
-  ) => Promise<{ error: { message: string } | null }>,
+  mutateOne: (id: string) => Promise<{ error: { message: string } | null }>
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   await queryClient.cancelQueries({ queryKey: [ORDERS_QUERY_KEY] });
   const previousEntries = queryClient.getQueriesData<OrdersListQueryData>({
@@ -169,10 +169,10 @@ async function runBulkOrderFieldUpdates(
       return {
         ...old,
         rows: old.rows.map((row) =>
-          idSet.has(row.id) ? applyOrderRowPatch(row, optimisticPatch) : row,
+          idSet.has(row.id) ? applyOrderRowPatch(row, optimisticPatch) : row
         ),
       };
-    },
+    }
   );
   const results = await Promise.all(updatableIds.map((id) => mutateOne(id)));
   const failed = results.find((r) => r.error);
@@ -214,9 +214,9 @@ function OrdersPage() {
   const [listFieldError, setListFieldError] = useState<string | null>(null);
   const [createOrderError, setCreateOrderError] = useState<string | null>(null);
   const [deleteOrderError, setDeleteOrderError] = useState<string | null>(null);
-  const [dismissedOrdersError, setDismissedOrdersError] = useState<string | null>(
-    null
-  );
+  const [dismissedOrdersError, setDismissedOrdersError] = useState<
+    string | null
+  >(null);
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
   const [isMoveToPopoverOpen, setIsMoveToPopoverOpen] = useState(false);
   const [bulkActionType, setBulkActionType] = useState<
@@ -255,27 +255,7 @@ function OrdersPage() {
     placeholderData: (previousData) => previousData,
   });
 
-  const totalsQuery = useQuery({
-    queryKey: [
-      ORDERS_TOTALS_QUERY_KEY,
-      listUrl.q,
-      listUrl.payment,
-      listUrl.product,
-      listUrl.pkg,
-    ],
-    queryFn: async () => {
-      const res = await fetchOrdersTotals({
-        itemSearch: listUrl.q || undefined,
-        paymentStatus: listUrl.payment,
-        productStatus: listUrl.product,
-        packageNumber: listUrl.pkg,
-      });
-      if (res.error) {
-        throw new Error(res.error.message);
-      }
-      return { totalCost: res.totalCost, totalProfit: res.totalProfit };
-    },
-  });
+  // Totals are fetched/rendered by `OrdersTotalsSummary`.
 
   const packageNumbersQuery = useQuery({
     queryKey: PACKAGE_NUMBERS_QUERY_KEY,
@@ -324,10 +304,10 @@ function OrdersPage() {
           return {
             ...old,
             rows: old.rows.map((row) =>
-              row.id === orderId ? applyOrderRowPatch(row, patch) : row,
+              row.id === orderId ? applyOrderRowPatch(row, patch) : row
             ),
           };
-        },
+        }
       );
       return { previousEntries };
     },
@@ -450,8 +430,7 @@ function OrdersPage() {
 
     const costTrim = newOrder.cost.trim();
     const priceTrim = newOrder.price.trim();
-    const costNumber =
-      costTrim === "" ? 0 : Number.parseFloat(newOrder.cost);
+    const costNumber = costTrim === "" ? 0 : Number.parseFloat(newOrder.cost);
     const priceNumber =
       priceTrim === "" ? 0 : Number.parseFloat(newOrder.price);
     if (!Number.isFinite(costNumber) || !Number.isFinite(priceNumber)) {
@@ -492,24 +471,15 @@ function OrdersPage() {
   const orders = ordersQuery.data?.rows ?? [];
   const packageNumberOptions = packageNumbersQuery.data ?? [];
   const totalRowCount = ordersQuery.data?.count ?? 0;
-  const totalCost = totalsQuery.data?.totalCost ?? 0;
-  const totalProfit = totalsQuery.data?.totalProfit ?? 0;
   /** 換頁、篩選、搜尋或資料重抓時顯示 skeleton（含 isLoading 的首次載入） */
-  const ordersLoading =
-    ordersQuery.isFetching || totalsQuery.isFetching;
+  const ordersLoading = ordersQuery.isFetching || ordersQuery.isLoading;
   const ordersError =
-    (ordersQuery.error as Error | null)?.message ??
-    (totalsQuery.error as Error | null)?.message ??
-    null;
+    (ordersQuery.error as Error | null)?.message ?? null;
 
   const totalPages = Math.max(1, Math.ceil(totalRowCount / ORDERS_PAGE_SIZE));
   const safeCurrentPage = Math.min(listUrl.page, totalPages);
   useEffect(() => {
-    if (
-      ordersQuery.isFetching ||
-      ordersQuery.isLoading ||
-      !ordersQuery.data
-    ) {
+    if (ordersQuery.isFetching || ordersQuery.isLoading || !ordersQuery.data) {
       return;
     }
     if (safeCurrentPage !== listUrl.page) {
@@ -524,7 +494,10 @@ function OrdersPage() {
     safeCurrentPage,
   ]);
 
-  const filterPackageSelectValues = ["全部", ...packageNumberOptions.toReversed()];
+  const filterPackageSelectValues = [
+    "全部",
+    ...packageNumberOptions.toReversed(),
+  ];
   const paginatedOrderIds = orders.map((order) => order.id);
   const isAllCurrentPageSelected =
     paginatedOrderIds.length > 0 &&
@@ -584,7 +557,7 @@ function OrdersPage() {
       listUrlRef.current,
       needUpdateIds,
       { packageNumber: bulkPackageNumber },
-      (id) => updateOrderFields(id, { packageNumber: bulkPackageNumber }),
+      (id) => updateOrderFields(id, { packageNumber: bulkPackageNumber })
     );
     if (bulkResult.ok === false) {
       setListFieldError(bulkResult.message);
@@ -626,7 +599,7 @@ function OrdersPage() {
       listUrlRef.current,
       needUpdateIds,
       { paymentStatus: bulkPaymentStatus },
-      (id) => updateOrderFields(id, { paymentStatus: bulkPaymentStatus }),
+      (id) => updateOrderFields(id, { paymentStatus: bulkPaymentStatus })
     );
     if (bulkResult.ok === false) {
       setListFieldError(bulkResult.message);
@@ -671,13 +644,13 @@ function OrdersPage() {
     if (needUpdateIds.length === 0) {
       if (lockedIds.length > 0 || paymentBlockedIds.length > 0) {
         setListFieldError(
-          "部分訂單未變更商品狀態（已出貨或收款未入帳時不可改為已出貨）",
+          "部分訂單未變更商品狀態（已出貨或收款未入帳時不可改為已出貨）"
         );
       } else {
         setListFieldError(null);
       }
       const skippedIds = Array.from(
-        new Set([...lockedIds, ...paymentBlockedIds]),
+        new Set([...lockedIds, ...paymentBlockedIds])
       );
       setSelectedOrderIds(skippedIds);
       setIsMoveToPopoverOpen(false);
@@ -688,7 +661,7 @@ function OrdersPage() {
       listUrlRef.current,
       needUpdateIds,
       { productStatus: bulkProductStatus },
-      (id) => updateOrderFields(id, { productStatus: bulkProductStatus }),
+      (id) => updateOrderFields(id, { productStatus: bulkProductStatus })
     );
     if (bulkResult.ok === false) {
       setListFieldError(bulkResult.message);
@@ -699,7 +672,9 @@ function OrdersPage() {
         "部分訂單未變更商品狀態（已出貨或收款未入帳時不可改為已出貨）"
       );
     }
-    const skippedIds = Array.from(new Set([...lockedIds, ...paymentBlockedIds]));
+    const skippedIds = Array.from(
+      new Set([...lockedIds, ...paymentBlockedIds])
+    );
     setSelectedOrderIds(skippedIds);
     setIsMoveToPopoverOpen(false);
   };
@@ -1212,167 +1187,184 @@ function OrdersPage() {
               orders.map((order) => {
                 const isLocked = order.productStatus === "已出貨";
                 return (
-                <TableRow key={order.id}>
-                  <TableCell>
-                    <input
-                      type="checkbox"
-                      checked={selectedOrderIds.includes(order.id)}
-                      onChange={(event) =>
-                        toggleSelectOrder(order.id, event.target.checked)
-                      }
-                      aria-label={`選擇訂單 ${order.id}`}
-                    />
-                  </TableCell>
-                  <TableCell>{order.item}</TableCell>
-                  <TableCell>{order.quantity}</TableCell>
-                  <TableCell>{order.purchaseDate}</TableCell>
-                  <TableCell>{order.buyer}</TableCell>
-                  <TableCell>
-                    <Select
-                      disabled={isLocked}
-                      value={order.payer}
-                      onValueChange={(value) => {
-                        if (isLocked) return;
-                        if (value === "虹" || value === "藍") {
-                          void persistListPatch(order.id, { payer: value });
+                  <TableRow key={order.id}>
+                    <TableCell>
+                      <input
+                        type="checkbox"
+                        checked={selectedOrderIds.includes(order.id)}
+                        onChange={(event) =>
+                          toggleSelectOrder(order.id, event.target.checked)
                         }
-                      }}
-                    >
-                      <SelectTrigger className="h-8 w-24" aria-label="付款人">
-                        <SelectValue placeholder="付款人" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="虹">虹</SelectItem>
-                        <SelectItem value="藍">藍</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </TableCell>
-                  <TableCell>{order.price}</TableCell>
-                  <TableCell>{order.cost}</TableCell>
-                  <TableCell>{order.revenue}</TableCell>
-                  <TableCell>{order.domesticShippingFee}</TableCell>
-                  <TableCell>
-                    <Select
-                      disabled={isLocked}
-                      value={order.paymentStatus}
-                      onValueChange={(value) => {
-                        if (isLocked) return;
-                        if (
-                          value === "未收款" ||
-                          value === "已收款" ||
-                          value === "已入帳"
-                        ) {
-                          void persistListPatch(order.id, {
-                            paymentStatus: value,
-                          });
-                        }
-                      }}
-                    >
-                      <SelectTrigger
-                        className={`h-8 w-28 ${paymentStatusTextClass(
-                          order.paymentStatus
-                        )}`}
-                        aria-label="收款狀態"
+                        aria-label={`選擇訂單 ${order.id}`}
+                      />
+                    </TableCell>
+                    <TableCell>{order.item}</TableCell>
+                    <TableCell>{order.quantity}</TableCell>
+                    <TableCell>{order.purchaseDate}</TableCell>
+                    <TableCell>{order.buyer}</TableCell>
+                    <TableCell>
+                      <Select
+                        disabled={isLocked}
+                        value={order.payer}
+                        onValueChange={(value) => {
+                          if (isLocked) return;
+                          if (value === "虹" || value === "藍") {
+                            void persistListPatch(order.id, { payer: value });
+                          }
+                        }}
                       >
-                        <SelectValue placeholder="收款狀態" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="未收款" className="text-red-500">
-                          未收款
-                        </SelectItem>
-                        <SelectItem value="已收款" className="text-amber-500">
-                          已收款
-                        </SelectItem>
-                        <SelectItem value="已入帳" className="text-green-500">
-                          已入帳
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </TableCell>
-                  <TableCell>
-                    <Select
-                      disabled={order.productStatus === "已出貨"}
-                      value={order.productStatus}
-                      onValueChange={(value) => {
-                        if (order.productStatus === "已出貨") {
-                          setListFieldError("商品狀態已出貨後不可再修改");
-                          return;
-                        }
-                        if (value === "已出貨" && order.paymentStatus !== "已入帳") {
-                          setListFieldError("收款狀態尚未入帳，不能將商品狀態改為已出貨");
-                          return;
-                        }
-                        if (
-                          value === "未購買" ||
-                          value === "已購買" ||
-                          value === "到虹家" ||
-                          value === "集運回台" ||
-                          value === "到台灣" ||
-                          value === "已出貨"
-                        ) {
-                          void persistListPatch(order.id, {
-                            productStatus: value,
-                          });
-                        }
-                      }}
-                    >
-                      <SelectTrigger className="h-8 w-32" aria-label="商品狀態">
-                        <SelectValue placeholder="商品狀態" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="未購買">未購買</SelectItem>
-                        <SelectItem value="已購買">已購買</SelectItem>
-                        <SelectItem value="到虹家">到虹家</SelectItem>
-                        <SelectItem value="集運回台">集運回台</SelectItem>
-                        <SelectItem value="到台灣">到台灣</SelectItem>
-                        <SelectItem value="已出貨">已出貨</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </TableCell>
-                  <TableCell>
-                    <Select
-                      disabled={isLocked}
-                      value={order.packageNumber}
-                      onValueChange={(value) =>
-                        handlePackageNumberChange(order.id, value, isLocked)
-                      }
-                    >
-                      <SelectTrigger className="h-8 w-32" aria-label="包裹編號">
-                        <SelectValue placeholder="包裹編號" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="未指定">未指定</SelectItem>
-                        {packageNumberOptions.map((packageNumber) => (
-                          <SelectItem key={packageNumber} value={packageNumber}>
-                            {packageNumber}
+                        <SelectTrigger className="h-8 w-24" aria-label="付款人">
+                          <SelectValue placeholder="付款人" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="虹">虹</SelectItem>
+                          <SelectItem value="藍">藍</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>{order.price}</TableCell>
+                    <TableCell>{order.cost}</TableCell>
+                    <TableCell>{order.revenue}</TableCell>
+                    <TableCell>{order.domesticShippingFee}</TableCell>
+                    <TableCell>
+                      <Select
+                        disabled={isLocked}
+                        value={order.paymentStatus}
+                        onValueChange={(value) => {
+                          if (isLocked) return;
+                          if (
+                            value === "未收款" ||
+                            value === "已收款" ||
+                            value === "已入帳"
+                          ) {
+                            void persistListPatch(order.id, {
+                              paymentStatus: value,
+                            });
+                          }
+                        }}
+                      >
+                        <SelectTrigger
+                          className={`h-8 w-28 ${paymentStatusTextClass(
+                            order.paymentStatus
+                          )}`}
+                          aria-label="收款狀態"
+                        >
+                          <SelectValue placeholder="收款狀態" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="未收款" className="text-red-500">
+                            未收款
                           </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </TableCell>
-                  <TableCell className="max-w-52 truncate" title={order.notes}>
-                    {order.notes}
-                  </TableCell>
-                  <TableCell className="space-x-2">
-                    <Link
-                      to={`/orders/${order.id}`}
-                      aria-label="查看訂單詳細"
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-input hover:bg-muted"
+                          <SelectItem value="已收款" className="text-amber-500">
+                            已收款
+                          </SelectItem>
+                          <SelectItem value="已入帳" className="text-green-500">
+                            已入帳
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
+                      <Select
+                        disabled={order.productStatus === "已出貨"}
+                        value={order.productStatus}
+                        onValueChange={(value) => {
+                          if (order.productStatus === "已出貨") {
+                            setListFieldError("商品狀態已出貨後不可再修改");
+                            return;
+                          }
+                          if (
+                            value === "已出貨" &&
+                            order.paymentStatus !== "已入帳"
+                          ) {
+                            setListFieldError(
+                              "收款狀態尚未入帳，不能將商品狀態改為已出貨"
+                            );
+                            return;
+                          }
+                          if (
+                            value === "未購買" ||
+                            value === "已購買" ||
+                            value === "到虹家" ||
+                            value === "集運回台" ||
+                            value === "到台灣" ||
+                            value === "已出貨"
+                          ) {
+                            void persistListPatch(order.id, {
+                              productStatus: value,
+                            });
+                          }
+                        }}
+                      >
+                        <SelectTrigger
+                          className="h-8 w-32"
+                          aria-label="商品狀態"
+                        >
+                          <SelectValue placeholder="商品狀態" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="未購買">未購買</SelectItem>
+                          <SelectItem value="已購買">已購買</SelectItem>
+                          <SelectItem value="到虹家">到虹家</SelectItem>
+                          <SelectItem value="集運回台">集運回台</SelectItem>
+                          <SelectItem value="到台灣">到台灣</SelectItem>
+                          <SelectItem value="已出貨">已出貨</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
+                      <Select
+                        disabled={isLocked}
+                        value={order.packageNumber}
+                        onValueChange={(value) =>
+                          handlePackageNumberChange(order.id, value, isLocked)
+                        }
+                      >
+                        <SelectTrigger
+                          className="h-8 w-32"
+                          aria-label="包裹編號"
+                        >
+                          <SelectValue placeholder="包裹編號" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="未指定">未指定</SelectItem>
+                          {packageNumberOptions.map((packageNumber) => (
+                            <SelectItem
+                              key={packageNumber}
+                              value={packageNumber}
+                            >
+                              {packageNumber}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell
+                      className="max-w-52 truncate"
+                      title={order.notes}
                     >
-                      <EyeIcon className="h-4 w-4" />
-                    </Link>
-                    <button
-                      type="button"
-                      aria-label="刪除訂單"
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-input text-destructive hover:bg-destructive/10"
-                      onClick={() => openDeleteDialog(order.id)}
-                    >
-                      <Trash2Icon className="h-4 w-4" />
-                    </button>
-                  </TableCell>
-                </TableRow>
-              );
-            })}
+                      {order.notes}
+                    </TableCell>
+                    <TableCell className="space-x-2">
+                      <Link
+                        to={`/orders/${order.id}`}
+                        aria-label="查看訂單詳細"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-input hover:bg-muted"
+                      >
+                        <EyeIcon className="h-4 w-4" />
+                      </Link>
+                      <button
+                        type="button"
+                        aria-label="刪除訂單"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-input text-destructive hover:bg-destructive/10"
+                        onClick={() => openDeleteDialog(order.id)}
+                      >
+                        <Trash2Icon className="h-4 w-4" />
+                      </button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
           </TableBody>
         </Table>
       </div>
@@ -1388,70 +1380,17 @@ function OrdersPage() {
         }}
         error={deleteOrderError}
         isSubmitting={deleteOrderMutation.isPending}
-        onConfirm={() => void confirmDeleteOrder()}
+        onConfirm={() => confirmDeleteOrder()}
       />
 
       <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-4 text-sm">
-          {ordersLoading ? (
-            <>
-              <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">總成本:</span>
-                <Skeleton className="h-5 w-24" />
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-muted-foreground">總收益:</span>
-                <Skeleton className="h-5 w-24" />
-              </div>
-            </>
-          ) : (
-            <>
-              <p>
-                總成本:{" "}
-                <span className="font-semibold">
-                  {totalCost.toLocaleString()}
-                </span>
-              </p>
-              <p>
-                總收益:{" "}
-                <span className="font-semibold">
-                  {totalProfit.toLocaleString()}
-                </span>
-              </p>
-            </>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              patchListUrl({ page: Math.max(1, safeCurrentPage - 1) })
-            }
-            disabled={ordersLoading || safeCurrentPage === 1}
-          >
-            上一頁
-          </Button>
-          {ordersLoading ? (
-            <Skeleton className="h-5 w-28" />
-          ) : (
-            <span className="text-sm text-muted-foreground">
-              第 {safeCurrentPage} / {totalPages} 頁
-            </span>
-          )}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              patchListUrl({ page: Math.min(totalPages, safeCurrentPage + 1) })
-            }
-            disabled={ordersLoading || safeCurrentPage === totalPages}
-          >
-            下一頁
-          </Button>
-        </div>
+        <OrdersTotalsSummary listUrl={listUrl} />
+        <Pagination
+          loading={ordersLoading}
+          currentPage={safeCurrentPage}
+          totalPages={totalPages}
+          onPageChange={(page) => patchListUrl({ page })}
+        />
       </div>
     </main>
   );

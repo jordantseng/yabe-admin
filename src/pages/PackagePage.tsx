@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useQueryStates } from "nuqs";
 import { Link } from "react-router-dom";
+import { Pagination } from "@/components/Pagination";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -1659,39 +1660,12 @@ function PackagePage() {
           )}
         </div>
 
-        <div className="flex items-center gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              patchListUrl({ page: Math.max(1, safeCurrentPage - 1) })
-            }
-            disabled={rowsLoading || safeCurrentPage === 1}
-          >
-            上一頁
-          </Button>
-          {rowsLoading ? (
-            <Skeleton className="h-5 w-28" />
-          ) : (
-            <span className="text-sm text-muted-foreground">
-              第 {safeCurrentPage} / {totalPages} 頁
-            </span>
-          )}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              patchListUrl({
-                page: Math.min(totalPages, safeCurrentPage + 1),
-              })
-            }
-            disabled={rowsLoading || safeCurrentPage === totalPages}
-          >
-            下一頁
-          </Button>
-        </div>
+        <Pagination
+          loading={rowsLoading}
+          currentPage={safeCurrentPage}
+          totalPages={totalPages}
+          onPageChange={(page) => patchListUrl({ page })}
+        />
       </div>
       <Dialog
         open={isSettlePackageDialogOpen}
