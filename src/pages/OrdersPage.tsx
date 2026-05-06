@@ -56,11 +56,9 @@ import {
   type OrdersListUrlState,
 } from "@/lib/orders-list-url";
 import { fetchPackageNumbersFromDb } from "@/lib/packages";
+import { ordersKeys, packagesKeys } from "@/lib/queryKeys";
 
 const ORDERS_PAGE_SIZE = 12;
-const ORDERS_QUERY_KEY = ["orders", "list"] as const;
-const ORDERS_TOTALS_QUERY_KEY = ["orders", "totals"] as const;
-const PACKAGE_NUMBERS_QUERY_KEY = ["packages", "numbers"] as const;
 
 type OrdersListQueryData = { rows: OrdersTableRow[]; count: number };
 
@@ -120,7 +118,7 @@ async function syncOrdersListViewCache(
     page: listUrl.page,
     pageSize: ORDERS_PAGE_SIZE,
   });
-  queryClient.setQueryData<OrdersListQueryData>([...ORDERS_QUERY_KEY, listUrl], {
+  queryClient.setQueryData<OrdersListQueryData>(ordersKeys.list(listUrl), {
     rows: (listRes.data ?? []).map(orderRecordToTableRow),
     count: listRes.count,
   });
@@ -131,16 +129,10 @@ async function syncOrdersListViewCache(
     productStatus: listUrl.product,
     packageNumber: listUrl.pkg,
   });
-  queryClient.setQueryData(
-    [
-      ...ORDERS_TOTALS_QUERY_KEY,
-      listUrl.q,
-      listUrl.payment,
-      listUrl.product,
-      listUrl.pkg,
-    ],
-    { totalCost: totalsRes.totalCost, totalProfit: totalsRes.totalProfit }
-  );
+  queryClient.setQueryData(ordersKeys.totalsForList(listUrl), {
+    totalCost: totalsRes.totalCost,
+    totalProfit: totalsRes.totalProfit,
+  });
 }
 
 async function runBulkOrderFieldUpdates(
@@ -150,13 +142,13 @@ async function runBulkOrderFieldUpdates(
   optimisticPatch: OrderListFieldsPatch,
   mutateOne: (id: string) => Promise<void>
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  await queryClient.cancelQueries({ queryKey: ORDERS_QUERY_KEY });
+  await queryClient.cancelQueries({ queryKey: ordersKeys.lists() });
   const previousEntries = queryClient.getQueriesData<OrdersListQueryData>({
-    queryKey: ORDERS_QUERY_KEY,
+    queryKey: ordersKeys.lists(),
   });
   const idSet = new Set(updatableIds);
   queryClient.setQueriesData<OrdersListQueryData>(
-    { queryKey: ORDERS_QUERY_KEY },
+    { queryKey: ordersKeys.lists() },
     (old) => {
       if (!old) return old;
       return {
@@ -207,7 +199,7 @@ function OrdersPage() {
   // Search input is owned by `SearchBar`.
 
   const ordersQuery = useQuery({
-    queryKey: [...ORDERS_QUERY_KEY, listUrl],
+    queryKey: ordersKeys.list(listUrl),
     queryFn: async () => {
       const res = await fetchOrders({
         itemSearch: listUrl.q || undefined,
@@ -229,7 +221,7 @@ function OrdersPage() {
   // Totals are fetched/rendered by `OrdersTotalsSummary`.
 
   const packageNumbersQuery = useQuery({
-    queryKey: PACKAGE_NUMBERS_QUERY_KEY,
+    queryKey: packagesKeys.numbers(),
     queryFn: async () => {
       const res = await fetchPackageNumbersFromDb();
       return res.data;
@@ -237,8 +229,8 @@ function OrdersPage() {
   });
 
   const invalidateOrdersData = () => {
-    void queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY });
-    void queryClient.invalidateQueries({ queryKey: ORDERS_TOTALS_QUERY_KEY });
+    void queryClient.invalidateQueries({ queryKey: ordersKeys.lists() });
+    void queryClient.invalidateQueries({ queryKey: ordersKeys.totals() });
   };
   const patchListUrl = useCallback(
     (patch: Partial<OrdersListUrlState>, opts?: { replace?: boolean }) => {
@@ -260,12 +252,12 @@ function OrdersPage() {
       await updateOrderFields(orderId, patch);
     },
     onMutate: async ({ orderId, patch }) => {
-      await queryClient.cancelQueries({ queryKey: ORDERS_QUERY_KEY });
+      await queryClient.cancelQueries({ queryKey: ordersKeys.lists() });
       const previousEntries = queryClient.getQueriesData<OrdersListQueryData>({
-        queryKey: ORDERS_QUERY_KEY,
+        queryKey: ordersKeys.lists(),
       });
       queryClient.setQueriesData<OrdersListQueryData>(
-        { queryKey: ORDERS_QUERY_KEY },
+        { queryKey: ordersKeys.lists() },
         (old) => {
           if (!old) return old;
           return {

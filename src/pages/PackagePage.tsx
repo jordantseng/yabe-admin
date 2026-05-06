@@ -75,12 +75,10 @@ import type {
   OrderPaymentStatus,
   OrderProductStatus,
 } from "@/types/database";
+import { packagesKeys } from "@/lib/queryKeys";
 
 /** 每頁顯示 1 個包裹（排序新→舊） */
 const PACKAGE_GROUPS_PER_PAGE = 1;
-const PACKAGE_ROWS_QUERY_KEY = ["packages", "page-rows"] as const;
-const PACKAGE_NUMBERS_QUERY_KEY = ["packages", "numbers"] as const;
-const PACKAGE_NEXT_NUMBER_QUERY_KEY = ["packages", "next-number-peek"] as const;
 const EMPTY_PACKAGE_ROWS: PackageTableRow[] = [];
 const EMPTY_PACKAGE_NUMBERS: string[] = [];
 
@@ -216,7 +214,7 @@ type PackageRowsQueryData = {
 
 function packageRowsQueryKey(listUrl: PackagesListUrlState) {
   return [
-    PACKAGE_ROWS_QUERY_KEY,
+    ...packagesKeys.pageRows(),
     listUrl.q,
     listUrl.pkg,
     listUrl.product,
@@ -298,14 +296,14 @@ async function runBulkPackagePageProductStatusUpdates(
   updatableIds: string[],
   productStatus: PackageTableRow["productStatus"],
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  await queryClient.cancelQueries({ queryKey: [PACKAGE_ROWS_QUERY_KEY] });
+  await queryClient.cancelQueries({ queryKey: packagesKeys.pageRows() });
   const previousEntries = queryClient.getQueriesData<PackageRowsQueryData>({
-    queryKey: [PACKAGE_ROWS_QUERY_KEY],
+    queryKey: packagesKeys.pageRows(),
   });
   const idSet = new Set(updatableIds);
   const optimisticPatch: OrderListFieldsPatch = { productStatus };
   queryClient.setQueriesData<PackageRowsQueryData>(
-    { queryKey: [PACKAGE_ROWS_QUERY_KEY] },
+    { queryKey: packagesKeys.pageRows() },
     (old) => {
       if (!old) return old;
       return {
@@ -401,7 +399,7 @@ function PackagePage() {
   });
 
   const packageNumbersQuery = useQuery({
-    queryKey: PACKAGE_NUMBERS_QUERY_KEY,
+    queryKey: packagesKeys.numbers(),
     queryFn: async () => {
       const res = await fetchPackageNumbersFromDb();
       return res.data;
@@ -409,7 +407,7 @@ function PackagePage() {
   });
 
   const nextPackageNumberQuery = useQuery({
-    queryKey: PACKAGE_NEXT_NUMBER_QUERY_KEY,
+    queryKey: packagesKeys.nextNumberPeek(),
     queryFn: async () => {
       const res = await peekNextPackageNumber();
       if (res.data == null) {
@@ -424,10 +422,10 @@ function PackagePage() {
     mutationFn: createPackage,
     onSuccess: async () => {
       void queryClient.invalidateQueries({
-        queryKey: PACKAGE_NUMBERS_QUERY_KEY,
+        queryKey: packagesKeys.numbers(),
       });
       void queryClient.invalidateQueries({
-        queryKey: PACKAGE_NEXT_NUMBER_QUERY_KEY,
+        queryKey: packagesKeys.nextNumberPeek(),
       });
       await syncPackageRowsCache(queryClient, listUrlRef.current);
     },
@@ -440,12 +438,12 @@ function PackagePage() {
       await updateOrderFields(args.id, args.patch);
     },
     onMutate: async ({ id, patch }) => {
-      await queryClient.cancelQueries({ queryKey: [PACKAGE_ROWS_QUERY_KEY] });
+      await queryClient.cancelQueries({ queryKey: packagesKeys.pageRows() });
       const previousEntries = queryClient.getQueriesData<PackageRowsQueryData>({
-        queryKey: [PACKAGE_ROWS_QUERY_KEY],
+        queryKey: packagesKeys.pageRows(),
       });
       queryClient.setQueriesData<PackageRowsQueryData>(
-        { queryKey: [PACKAGE_ROWS_QUERY_KEY] },
+        { queryKey: packagesKeys.pageRows() },
         (old) => {
           if (!old) return old;
           return {

@@ -2,8 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import Skeleton from "@/components/ui/skeleton";
 import { fetchOrdersTotals } from "@/lib/orders";
 import { type OrdersListUrlState } from "@/lib/orders-list-url";
-
-const ORDERS_TOTALS_QUERY_KEY = ["orders", "totals"] as const;
+import { ordersKeys } from "@/lib/queryKeys";
 
 type OrdersTotalsSummaryProps = {
   listUrl: OrdersListUrlState;
@@ -11,13 +10,7 @@ type OrdersTotalsSummaryProps = {
 
 export default function OrdersTotalsSummary({ listUrl }: OrdersTotalsSummaryProps) {
   const totalsQuery = useQuery({
-    queryKey: [
-      ...ORDERS_TOTALS_QUERY_KEY,
-      listUrl.q,
-      listUrl.payment,
-      listUrl.product,
-      listUrl.pkg,
-    ],
+    queryKey: ordersKeys.totalsForList(listUrl),
     queryFn: async () => {
       const res = await fetchOrdersTotals({
         itemSearch: listUrl.q || undefined,

@@ -18,8 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { fetchPackageNumbersFromDb } from "@/lib/packages";
-
-const PACKAGE_NUMBERS_QUERY_KEY = ["packages", "numbers"] as const;
+import { packagesKeys } from "@/lib/queryKeys";
 
 const REQUIRED_MSG = "此欄位為必填";
 
@@ -77,7 +76,7 @@ function OrderDetailPage() {
   const watchedDomesticShippingFee = watch("domesticShippingFee");
   const watchedRevenue = watch("revenue");
   const packageNumbersQuery = useQuery({
-    queryKey: PACKAGE_NUMBERS_QUERY_KEY,
+    queryKey: packagesKeys.numbers(),
     queryFn: async () => {
       const res = await fetchPackageNumbersFromDb();
       return res.data;
