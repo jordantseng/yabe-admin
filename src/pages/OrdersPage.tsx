@@ -19,6 +19,7 @@ import {
   CreateOrderDialog,
   type NewOrderDraft,
 } from "@/components/orders/CreateOrderDialog";
+import OrdersTotalsSummary from "@/components/orders/OrdersTotalsSummary";
 import { DeleteOrderDialog } from "@/components/orders/DeleteOrderDialog";
 import { Pagination } from "@/components/Pagination";
 import { Button } from "@/components/ui/button";
@@ -59,7 +60,6 @@ import {
   type OrdersListUrlState,
 } from "@/lib/orders-list-url";
 import { fetchPackageNumbersFromDb } from "@/lib/packages";
-import OrdersTotalsSummary from "@/pages/OrdersPage/components/OrdersTotalsSummary";
 
 const ORDERS_PAGE_SIZE = 12;
 const ORDERS_QUERY_KEY = ["orders", "list"] as const;
