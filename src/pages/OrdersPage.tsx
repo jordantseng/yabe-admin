@@ -15,10 +15,7 @@ import {
 } from "lucide-react";
 import { useQueryStates } from "nuqs";
 import { Link } from "react-router-dom";
-import {
-  CreateOrderDialog,
-  type NewOrderDraft,
-} from "@/components/orders/CreateOrderDialog";
+import { CreateOrderDialog } from "@/components/orders/CreateOrderDialog";
 import OrdersTotalsSummary from "@/components/orders/OrdersTotalsSummary";
 import { DeleteOrderDialog } from "@/components/orders/DeleteOrderDialog";
 import { Pagination } from "@/components/Pagination";
@@ -46,7 +43,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  createOrder,
   deleteOrderById,
   fetchOrders,
   fetchOrdersTotals,
@@ -125,7 +121,7 @@ async function syncOrdersListViewCache(
     pageSize: ORDERS_PAGE_SIZE,
   });
   if (!listRes.error) {
-    queryClient.setQueryData<OrdersListQueryData>([ORDERS_QUERY_KEY, listUrl], {
+    queryClient.setQueryData<OrdersListQueryData>([...ORDERS_QUERY_KEY, listUrl], {
       rows: (listRes.data ?? []).map(orderRecordToTableRow),
       count: listRes.count,
     });
@@ -139,7 +135,7 @@ async function syncOrdersListViewCache(
   if (!totalsRes.error) {
     queryClient.setQueryData(
       [
-        ORDERS_TOTALS_QUERY_KEY,
+        ...ORDERS_TOTALS_QUERY_KEY,
         listUrl.q,
         listUrl.payment,
         listUrl.product,
@@ -157,13 +153,13 @@ async function runBulkOrderFieldUpdates(
   optimisticPatch: OrderListFieldsPatch,
   mutateOne: (id: string) => Promise<{ error: { message: string } | null }>
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  await queryClient.cancelQueries({ queryKey: [ORDERS_QUERY_KEY] });
+  await queryClient.cancelQueries({ queryKey: ORDERS_QUERY_KEY });
   const previousEntries = queryClient.getQueriesData<OrdersListQueryData>({
-    queryKey: [ORDERS_QUERY_KEY],
+    queryKey: ORDERS_QUERY_KEY,
   });
   const idSet = new Set(updatableIds);
   queryClient.setQueriesData<OrdersListQueryData>(
-    { queryKey: [ORDERS_QUERY_KEY] },
+    { queryKey: ORDERS_QUERY_KEY },
     (old) => {
       if (!old) return old;
       return {
@@ -212,7 +208,6 @@ function OrdersPage() {
     useState<string>("全部");
   const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
   const [listFieldError, setListFieldError] = useState<string | null>(null);
-  const [createOrderError, setCreateOrderError] = useState<string | null>(null);
   const [deleteOrderError, setDeleteOrderError] = useState<string | null>(null);
   const [dismissedOrdersError, setDismissedOrdersError] = useState<
     string | null
@@ -233,7 +228,7 @@ function OrdersPage() {
   const searchInputRef = useRef<HTMLInputElement | null>(null);
 
   const ordersQuery = useQuery({
-    queryKey: [ORDERS_QUERY_KEY, listUrl],
+    queryKey: [...ORDERS_QUERY_KEY, listUrl],
     queryFn: async () => {
       const res = await fetchOrders({
         itemSearch: listUrl.q || undefined,
@@ -269,8 +264,8 @@ function OrdersPage() {
   });
 
   const invalidateOrdersData = () => {
-    void queryClient.invalidateQueries({ queryKey: [ORDERS_QUERY_KEY] });
-    void queryClient.invalidateQueries({ queryKey: [ORDERS_TOTALS_QUERY_KEY] });
+    void queryClient.invalidateQueries({ queryKey: ORDERS_QUERY_KEY });
+    void queryClient.invalidateQueries({ queryKey: ORDERS_TOTALS_QUERY_KEY });
   };
   const patchListUrl = useCallback(
     (patch: Partial<OrdersListUrlState>, opts?: { replace?: boolean }) => {
@@ -293,12 +288,12 @@ function OrdersPage() {
       if (error) throw new Error(error.message);
     },
     onMutate: async ({ orderId, patch }) => {
-      await queryClient.cancelQueries({ queryKey: [ORDERS_QUERY_KEY] });
+      await queryClient.cancelQueries({ queryKey: ORDERS_QUERY_KEY });
       const previousEntries = queryClient.getQueriesData<OrdersListQueryData>({
-        queryKey: [ORDERS_QUERY_KEY],
+        queryKey: ORDERS_QUERY_KEY,
       });
       queryClient.setQueriesData<OrdersListQueryData>(
-        { queryKey: [ORDERS_QUERY_KEY] },
+        { queryKey: ORDERS_QUERY_KEY },
         (old) => {
           if (!old) return old;
           return {
@@ -321,16 +316,6 @@ function OrdersPage() {
     },
     onSuccess: async () => {
       await syncOrdersListViewCache(queryClient, listUrlRef.current);
-    },
-  });
-
-  const createOrderMutation = useMutation({
-    mutationFn: createOrder,
-    onSuccess: () => {
-      invalidateOrdersData();
-    },
-    onError: (error) => {
-      setCreateOrderError(error.message);
     },
   });
 
@@ -408,64 +393,6 @@ function OrdersPage() {
     }
     setOrderToDeleteId(null);
     setIsDeleteDialogOpen(false);
-  };
-
-  const handleCreateOrder = async (newOrder: NewOrderDraft) => {
-    const item = newOrder.item.trim();
-    const buyer = newOrder.buyer.trim();
-    const recipientName = newOrder.recipientName.trim();
-    const phone = newOrder.phone.trim();
-    const quantityNumber = Number.parseInt(newOrder.quantity, 10);
-    const domesticDeliveryAddress = newOrder.domesticDeliveryAddress.trim();
-    const purchaseDate = newOrder.purchaseDate.trim();
-    if (
-      !item ||
-      !buyer ||
-      !purchaseDate ||
-      !Number.isFinite(quantityNumber) ||
-      quantityNumber < 1
-    ) {
-      return;
-    }
-
-    const costTrim = newOrder.cost.trim();
-    const priceTrim = newOrder.price.trim();
-    const costNumber = costTrim === "" ? 0 : Number.parseFloat(newOrder.cost);
-    const priceNumber =
-      priceTrim === "" ? 0 : Number.parseFloat(newOrder.price);
-    if (!Number.isFinite(costNumber) || !Number.isFinite(priceNumber)) {
-      return;
-    }
-    const domesticShippingFeeNumber = Number.parseFloat(
-      newOrder.domesticShippingFee
-    );
-
-    setCreateOrderError(null);
-    const createResult = await createOrderMutation.mutateAsync({
-      item,
-      notes: newOrder.notes,
-      purchaseDate,
-      recipientName: recipientName || undefined,
-      phone: phone || undefined,
-      quantity: quantityNumber,
-      buyer,
-      domesticDeliveryAddress: domesticDeliveryAddress || undefined,
-      payer: newOrder.payer,
-      cost: costNumber,
-      price: priceNumber,
-      domesticShippingFee: Number.isNaN(domesticShippingFeeNumber)
-        ? 0
-        : domesticShippingFeeNumber,
-      paymentStatus: newOrder.paymentStatus,
-      productStatus: newOrder.productStatus,
-      packageNumber: newOrder.packageNumber,
-    });
-    if (createResult.error) {
-      setCreateOrderError(createResult.error.message);
-      return;
-    }
-
-    setIsCreateOrderDialogOpen(false);
   };
 
   const orders = ordersQuery.data?.rows ?? [];
@@ -753,14 +680,7 @@ function OrdersPage() {
             open={isCreateOrderDialogOpen}
             onOpenChange={(open) => {
               setIsCreateOrderDialogOpen(open);
-              if (!open) {
-                setCreateOrderError(null);
-              }
             }}
-            createOrderError={createOrderError}
-            isSubmitting={createOrderMutation.isPending}
-            packageNumberOptions={packageNumberOptions}
-            onCreate={(draft) => void handleCreateOrder(draft)}
           />
         </div>
       </div>
