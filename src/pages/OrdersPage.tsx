@@ -8,8 +8,6 @@ import {
 import {
   ArrowUpDownIcon,
   EyeIcon,
-  FilterIcon,
-  FolderInputIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react";
@@ -18,15 +16,17 @@ import { Link } from "react-router-dom";
 import CreateOrderDialog from "@/components/orders/CreateOrderDialog";
 import OrdersTotalsSummary from "@/components/orders/OrdersTotalsSummary";
 import DeleteOrderDialog from "@/components/orders/DeleteOrderDialog";
+import OrdersActiveFiltersChips from "@/components/orders/OrdersActiveFiltersChips";
 import Pagination from "@/components/Pagination";
 import SearchBar from "@/components/SearchBar";
 import Button from "@/components/ui/button";
 import Skeleton from "@/components/ui/skeleton";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import OrdersFiltersPopover from "@/components/orders/OrdersFiltersPopover";
+import OrdersBulkActionPopover, {
+  type OrdersBulkActionType,
+  type OrdersBulkPaymentStatus,
+  type OrdersBulkProductStatus,
+} from "@/components/orders/OrdersBulkActionPopover";
 import {
   Select,
   SelectContent,
@@ -200,30 +200,12 @@ function OrdersPage() {
   useEffect(() => {
     listUrlRef.current = listUrl;
   }, [listUrl]);
-  const [draftFilterPaymentStatus, setDraftFilterPaymentStatus] =
-    useState<OrdersListUrlState["payment"]>("全部");
-  const [draftFilterProductStatus, setDraftFilterProductStatus] =
-    useState<OrdersListUrlState["product"]>("全部");
-  const [draftFilterPackageNumber, setDraftFilterPackageNumber] =
-    useState<string>("全部");
-  const [isFilterPopoverOpen, setIsFilterPopoverOpen] = useState(false);
   const [listFieldError, setListFieldError] = useState<string | null>(null);
   const [deleteOrderError, setDeleteOrderError] = useState<string | null>(null);
   const [dismissedOrdersError, setDismissedOrdersError] = useState<
     string | null
   >(null);
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
-  const [isMoveToPopoverOpen, setIsMoveToPopoverOpen] = useState(false);
-  const [bulkActionType, setBulkActionType] = useState<
-    "包裹編號" | "收款狀態" | "商品狀態"
-  >("包裹編號");
-  const [bulkPackageNumber, setBulkPackageNumber] = useState("未指定");
-  const [bulkPaymentStatus, setBulkPaymentStatus] = useState<
-    "未收款" | "已收款" | "已入帳"
-  >("未收款");
-  const [bulkProductStatus, setBulkProductStatus] = useState<
-    "未購買" | "已購買" | "到虹家" | "集運回台" | "到台灣" | "已出貨"
-  >("未購買");
   const queryClient = useQueryClient();
   // Search input is owned by `SearchBar`.
 
@@ -359,23 +341,6 @@ function OrdersPage() {
     setOrderToDeleteId(orderId);
     setIsDeleteDialogOpen(true);
   };
-  const handleFilterPopoverOpenChange = (open: boolean) => {
-    setIsFilterPopoverOpen(open);
-    if (open) {
-      setDraftFilterPaymentStatus(listUrl.payment);
-      setDraftFilterProductStatus(listUrl.product);
-      setDraftFilterPackageNumber(listUrl.pkg);
-    }
-  };
-  const applyFilters = () => {
-    patchListUrl({
-      payment: draftFilterPaymentStatus,
-      product: draftFilterProductStatus,
-      pkg: draftFilterPackageNumber,
-      page: 1,
-    });
-    setIsFilterPopoverOpen(false);
-  };
   const applySearch = (value: string) => {
     patchListUrl({
       q: value.trim(),
@@ -420,10 +385,6 @@ function OrdersPage() {
     safeCurrentPage,
   ]);
 
-  const filterPackageSelectValues = [
-    "全部",
-    ...packageNumberOptions.toReversed(),
-  ];
   const paginatedOrderIds = orders.map((order) => order.id);
   const isAllCurrentPageSelected =
     paginatedOrderIds.length > 0 &&
@@ -452,7 +413,7 @@ function OrdersPage() {
       return currentSelected.filter((id) => id !== orderId);
     });
   };
-  const applyBulkPackageNumber = async () => {
+  const applyBulkPackageNumber = async (bulkPackageNumber: string) => {
     const ids = selectedOrderIds;
     if (ids.length === 0) {
       return;
@@ -475,7 +436,6 @@ function OrdersPage() {
     if (needUpdateIds.length === 0) {
       setListFieldError(null);
       setSelectedOrderIds(lockedIds);
-      setIsMoveToPopoverOpen(false);
       return;
     }
     const bulkResult = await runBulkOrderFieldUpdates(
@@ -493,9 +453,10 @@ function OrdersPage() {
       setListFieldError("部分已出貨訂單未變更包裹編號（已自動略過）");
     }
     setSelectedOrderIds(lockedIds);
-    setIsMoveToPopoverOpen(false);
   };
-  const applyBulkPaymentStatus = async () => {
+  const applyBulkPaymentStatus = async (
+    bulkPaymentStatus: OrdersBulkPaymentStatus
+  ) => {
     const ids = selectedOrderIds;
     if (ids.length === 0) {
       return;
@@ -517,7 +478,6 @@ function OrdersPage() {
     if (needUpdateIds.length === 0) {
       setListFieldError(null);
       setSelectedOrderIds(lockedIds);
-      setIsMoveToPopoverOpen(false);
       return;
     }
     const bulkResult = await runBulkOrderFieldUpdates(
@@ -535,9 +495,10 @@ function OrdersPage() {
       setListFieldError("部分已出貨訂單未變更收款狀態（已自動略過）");
     }
     setSelectedOrderIds(lockedIds);
-    setIsMoveToPopoverOpen(false);
   };
-  const applyBulkProductStatus = async () => {
+  const applyBulkProductStatus = async (
+    bulkProductStatus: OrdersBulkProductStatus
+  ) => {
     const ids = selectedOrderIds;
     if (ids.length === 0) {
       return;
@@ -579,7 +540,6 @@ function OrdersPage() {
         new Set([...lockedIds, ...paymentBlockedIds])
       );
       setSelectedOrderIds(skippedIds);
-      setIsMoveToPopoverOpen(false);
       return;
     }
     const bulkResult = await runBulkOrderFieldUpdates(
@@ -602,18 +562,20 @@ function OrdersPage() {
       new Set([...lockedIds, ...paymentBlockedIds])
     );
     setSelectedOrderIds(skippedIds);
-    setIsMoveToPopoverOpen(false);
   };
-  const applySelectedBulkAction = async () => {
-    if (bulkActionType === "包裹編號") {
-      await applyBulkPackageNumber();
+  const applySelectedBulkAction = async (args: {
+    type: OrdersBulkActionType;
+    value: string | OrdersBulkPaymentStatus | OrdersBulkProductStatus;
+  }) => {
+    if (args.type === "包裹編號") {
+      await applyBulkPackageNumber(String(args.value));
       return;
     }
-    if (bulkActionType === "收款狀態") {
-      await applyBulkPaymentStatus();
+    if (args.type === "收款狀態") {
+      await applyBulkPaymentStatus(args.value as OrdersBulkPaymentStatus);
       return;
     }
-    await applyBulkProductStatus();
+    await applyBulkProductStatus(args.value as OrdersBulkProductStatus);
   };
 
   return (
@@ -693,291 +655,21 @@ function OrdersPage() {
           onSearch={(value) => applySearch(value)}
         />
         <div className="flex items-center gap-2">
-          <Popover
-            open={isFilterPopoverOpen}
-            onOpenChange={handleFilterPopoverOpenChange}
-          >
-            <PopoverTrigger
-              render={
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  aria-label="篩選"
-                >
-                  <FilterIcon className="h-4 w-4" />
-                </Button>
-              }
-            />
-            <PopoverContent className="w-72 p-3" align="end">
-              <p className="px-1 text-xs font-medium text-muted-foreground">
-                篩選條件
-              </p>
-              <div className="my-2 h-px bg-border" />
-              <div className="mt-2 space-y-3">
-                <div className="space-y-1">
-                  <p className="text-sm font-medium">收款狀態</p>
-                  <Select
-                    value={draftFilterPaymentStatus}
-                    onValueChange={(value) =>
-                      setDraftFilterPaymentStatus(
-                        value as OrdersListUrlState["payment"]
-                      )
-                    }
-                  >
-                    <SelectTrigger
-                      aria-label="篩選收款狀態"
-                      className={paymentStatusTextClass(
-                        draftFilterPaymentStatus
-                      )}
-                    >
-                      <SelectValue placeholder="收款狀態" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="全部">全部收款狀態</SelectItem>
-                      <SelectItem value="未收款" className="text-red-500">
-                        未收款
-                      </SelectItem>
-                      <SelectItem value="已收款" className="text-amber-500">
-                        已收款
-                      </SelectItem>
-                      <SelectItem value="已入帳" className="text-green-500">
-                        已入帳
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-sm font-medium">商品狀態</p>
-                  <Select
-                    value={draftFilterProductStatus}
-                    onValueChange={(value) =>
-                      setDraftFilterProductStatus(
-                        value as OrdersListUrlState["product"]
-                      )
-                    }
-                  >
-                    <SelectTrigger aria-label="篩選商品狀態">
-                      <SelectValue placeholder="商品狀態" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="全部">全部商品狀態</SelectItem>
-                      <SelectItem value="未購買">未購買</SelectItem>
-                      <SelectItem value="已購買">已購買</SelectItem>
-                      <SelectItem value="到虹家">到虹家</SelectItem>
-                      <SelectItem value="集運回台">集運回台</SelectItem>
-                      <SelectItem value="到台灣">到台灣</SelectItem>
-                      <SelectItem value="已出貨">已出貨</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <p className="text-sm font-medium">包裹編號</p>
-                  <Select
-                    value={draftFilterPackageNumber}
-                    onValueChange={(value) => {
-                      if (value) {
-                        setDraftFilterPackageNumber(value);
-                      }
-                    }}
-                  >
-                    <SelectTrigger aria-label="篩選包裹編號">
-                      <SelectValue placeholder="包裹編號" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {filterPackageSelectValues.map((pkg) => (
-                        <SelectItem key={pkg} value={pkg}>
-                          {pkg === "全部" ? "全部包裹編號" : pkg}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <Button type="button" className="w-full" onClick={applyFilters}>
-                  套用
-                </Button>
-              </div>
-            </PopoverContent>
-          </Popover>
+          <OrdersFiltersPopover
+            listUrl={listUrl}
+            packageNumberOptions={packageNumberOptions}
+            onApply={(patch) => patchListUrl(patch)}
+          />
           {selectedOrderIds.length > 0 && (
-            <Popover
-              open={isMoveToPopoverOpen}
-              onOpenChange={setIsMoveToPopoverOpen}
-            >
-              <PopoverTrigger
-                render={
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    aria-label="批次操作"
-                    title="批次操作"
-                  >
-                    <FolderInputIcon className="h-4 w-4" />
-                  </Button>
-                }
-              />
-              <PopoverContent className="w-72 space-y-1" align="start">
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">修改欄位</p>
-                  <Select
-                    value={bulkActionType}
-                    onValueChange={(value) => {
-                      if (
-                        value === "包裹編號" ||
-                        value === "收款狀態" ||
-                        value === "商品狀態"
-                      ) {
-                        setBulkActionType(value);
-                      }
-                    }}
-                  >
-                    <SelectTrigger aria-label="批次操作類型">
-                      <SelectValue placeholder="批次操作類型" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="包裹編號">包裹編號</SelectItem>
-                      <SelectItem value="收款狀態">收款狀態</SelectItem>
-                      <SelectItem value="商品狀態">商品狀態</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <p className="text-sm font-medium">設定值</p>
-                  {bulkActionType === "包裹編號" ? (
-                    <Select
-                      value={bulkPackageNumber}
-                      onValueChange={(value) =>
-                        value && setBulkPackageNumber(value)
-                      }
-                    >
-                      <SelectTrigger aria-label="批次設定包裹編號">
-                        <SelectValue placeholder="包裹編號" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="未指定">未指定</SelectItem>
-                        {packageNumberOptions.map((packageNumber) => (
-                          <SelectItem key={packageNumber} value={packageNumber}>
-                            {packageNumber}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : bulkActionType === "收款狀態" ? (
-                    <Select
-                      value={bulkPaymentStatus}
-                      onValueChange={(value) => {
-                        if (
-                          value === "未收款" ||
-                          value === "已收款" ||
-                          value === "已入帳"
-                        ) {
-                          setBulkPaymentStatus(value);
-                        }
-                      }}
-                    >
-                      <SelectTrigger
-                        aria-label="批次設定收款狀態"
-                        className={paymentStatusTextClass(bulkPaymentStatus)}
-                      >
-                        <SelectValue placeholder="收款狀態" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="未收款" className="text-red-500">
-                          未收款
-                        </SelectItem>
-                        <SelectItem value="已收款" className="text-amber-500">
-                          已收款
-                        </SelectItem>
-                        <SelectItem value="已入帳" className="text-green-500">
-                          已入帳
-                        </SelectItem>
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <Select
-                      value={bulkProductStatus}
-                      onValueChange={(value) => {
-                        if (
-                          value === "未購買" ||
-                          value === "已購買" ||
-                          value === "到虹家" ||
-                          value === "集運回台" ||
-                          value === "到台灣" ||
-                          value === "已出貨"
-                        ) {
-                          setBulkProductStatus(value);
-                        }
-                      }}
-                    >
-                      <SelectTrigger aria-label="批次設定商品狀態">
-                        <SelectValue placeholder="商品狀態" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="未購買">未購買</SelectItem>
-                        <SelectItem value="已購買">已購買</SelectItem>
-                        <SelectItem value="到虹家">到虹家</SelectItem>
-                        <SelectItem value="集運回台">集運回台</SelectItem>
-                        <SelectItem value="到台灣">到台灣</SelectItem>
-                        <SelectItem value="已出貨">已出貨</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
-                  <Button
-                    type="button"
-                    className="w-full"
-                    onClick={() => void applySelectedBulkAction()}
-                  >
-                    套用到已選訂單
-                  </Button>
-                </div>
-              </PopoverContent>
-            </Popover>
+            <OrdersBulkActionPopover
+              disabled={selectedOrderIds.length === 0}
+              packageNumberOptions={packageNumberOptions}
+              onApply={(args) => applySelectedBulkAction(args)}
+            />
           )}
         </div>
       </div>
-      <div className="mb-4 flex flex-wrap gap-2">
-        {listUrl.q !== "" && (
-          <button
-            type="button"
-            onClick={() => patchListUrl({ q: "", page: 1 })}
-            className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-3 py-1 text-xs"
-          >
-            品項: {listUrl.q}
-            <span aria-hidden="true">×</span>
-          </button>
-        )}
-        {listUrl.payment !== "全部" && (
-          <button
-            type="button"
-            onClick={() => patchListUrl({ payment: "全部", page: 1 })}
-            className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-3 py-1 text-xs"
-          >
-            收款狀態: {listUrl.payment}
-            <span aria-hidden="true">×</span>
-          </button>
-        )}
-        {listUrl.product !== "全部" && (
-          <button
-            type="button"
-            onClick={() => patchListUrl({ product: "全部", page: 1 })}
-            className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-3 py-1 text-xs"
-          >
-            商品狀態: {listUrl.product}
-            <span aria-hidden="true">×</span>
-          </button>
-        )}
-        {listUrl.pkg !== "全部" && (
-          <button
-            type="button"
-            onClick={() => patchListUrl({ pkg: "全部", page: 1 })}
-            className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-3 py-1 text-xs"
-          >
-            包裹編號: {listUrl.pkg}
-            <span aria-hidden="true">×</span>
-          </button>
-        )}
-      </div>
+      <OrdersActiveFiltersChips listUrl={listUrl} onPatch={patchListUrl} />
 
       <div
         className="my-4 overflow-x-auto"
