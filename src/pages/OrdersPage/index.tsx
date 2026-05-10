@@ -13,20 +13,20 @@ import {
 } from "lucide-react";
 import { useQueryStates } from "nuqs";
 import { Link } from "react-router-dom";
-import CreateOrderDialog from "@/components/orders/CreateOrderDialog";
-import OrdersTotalsSummary from "@/components/orders/OrdersTotalsSummary";
-import DeleteOrderDialog from "@/components/orders/DeleteOrderDialog";
-import OrdersActiveFiltersChips from "@/components/orders/OrdersActiveFiltersChips";
+import CreateOrderDialog from "@/pages/OrdersPage/components/CreateOrderDialog";
+import OrdersTotalsSummary from "@/pages/OrdersPage/components/OrdersTotalsSummary";
+import DeleteOrderDialog from "@/pages/OrdersPage/components/DeleteOrderDialog";
+import OrdersActiveFiltersChips from "@/pages/OrdersPage/components/OrdersActiveFiltersChips";
 import Pagination from "@/components/Pagination";
 import SearchBar from "@/components/SearchBar";
 import Button from "@/components/ui/button";
 import Skeleton from "@/components/ui/skeleton";
-import OrdersFiltersPopover from "@/components/orders/OrdersFiltersPopover";
+import OrdersFiltersPopover from "@/pages/OrdersPage/components/OrdersFiltersPopover";
 import OrdersBulkActionPopover, {
   type OrdersBulkActionType,
   type OrdersBulkPaymentStatus,
   type OrdersBulkProductStatus,
-} from "@/components/orders/OrdersBulkActionPopover";
+} from "@/pages/OrdersPage/components/OrdersBulkActionPopover";
 import {
   Select,
   SelectContent,

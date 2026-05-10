@@ -81,6 +81,7 @@ import { packagesKeys } from "@/lib/queryKeys";
 const PACKAGE_GROUPS_PER_PAGE = 1;
 const EMPTY_PACKAGE_ROWS: PackageTableRow[] = [];
 const EMPTY_PACKAGE_NUMBERS: string[] = [];
+const EMPTY_PACKAGE_STUBS: PackagePageEmptyPackageStub[] = [];
 
 /** 包裹列表列（由訂單 + 關聯包裹映射）。 */
 export type PackageTableRow = {
@@ -336,7 +337,9 @@ function PackagePage() {
     history: "push",
   });
   const listUrlRef = useRef(listUrl);
-  listUrlRef.current = listUrl;
+  useEffect(() => {
+    listUrlRef.current = listUrl;
+  }, [listUrl]);
   const [isCreatePackageDialogOpen, setIsCreatePackageDialogOpen] =
     useState(false);
   const [newPackageNotes, setNewPackageNotes] = useState("");
@@ -533,7 +536,8 @@ function PackagePage() {
     });
   };
   const rows = rowsQuery.data?.rows ?? EMPTY_PACKAGE_ROWS;
-  const emptyPackageStubs = rowsQuery.data?.emptyPackageStubs ?? [];
+  const emptyPackageStubs =
+    rowsQuery.data?.emptyPackageStubs ?? EMPTY_PACKAGE_STUBS;
   const packageNumberOptions =
     packageNumbersQuery.data ?? EMPTY_PACKAGE_NUMBERS;
   /** 換頁、篩選、搜尋時顯示 skeleton；欄位更新改以樂觀更新 + 手動 sync，不觸發列表 query 的 refetch */

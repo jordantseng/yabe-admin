@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Controller, useForm } from "react-hook-form";
+import { Controller, useForm, useWatch } from "react-hook-form";
 import { XIcon } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import Button from "@/components/ui/button";
@@ -67,16 +67,16 @@ function OrderDetailPage() {
     control,
     handleSubmit,
     reset,
-    watch,
+    getValues,
     setValue,
     formState: { isDirty, errors },
   } = useForm<OrderDetailFormValues>({
     defaultValues: emptyOrderDetailForm(),
   });
 
-  const watchedCost = watch("cost");
-  const watchedPrice = watch("price");
-  const watchedRevenue = watch("revenue");
+  const watchedCost = useWatch({ control, name: "cost", defaultValue: 0 });
+  const watchedPrice = useWatch({ control, name: "price", defaultValue: 0 });
+  const watchedRevenue = useWatch({ control, name: "revenue", defaultValue: 0 });
   const packageNumbersQuery = useQuery({
     queryKey: packagesKeys.numbers(),
     queryFn: async () => {
@@ -96,18 +96,25 @@ function OrderDetailPage() {
 
   const packageNumberOptions = packageNumbersQuery.data ?? [];
 
+  const orderIdMissing = !orderId;
+  const displayLoadError = orderIdMissing ? "缺少訂單編號" : loadError;
+  const showFetchLoading = Boolean(orderId && isLoading);
+  const formDisabled =
+    orderIdMissing || showFetchLoading || !!loadError;
+
   useEffect(() => {
     if (!orderId) {
-      setLoadError("缺少訂單編號");
-      setIsLoading(false);
       return;
     }
 
     let cancelled = false;
-    setLoadError(null);
-    setIsLoading(true);
 
-    (async () => {
+    void (async () => {
+      if (cancelled) {
+        return;
+      }
+      setLoadError(null);
+      setIsLoading(true);
       let data: Awaited<ReturnType<typeof fetchOrderById>>["data"];
       try {
         const res = await fetchOrderById(orderId);
@@ -168,8 +175,6 @@ function OrderDetailPage() {
     }
   };
 
-  const formDisabled = isLoading || !!loadError;
-
   return (
     <main
       className="mx-auto max-w-4xl space-y-4"
@@ -186,27 +191,29 @@ function OrderDetailPage() {
           返回
         </Button>
       </div>
-      {isLoading && (
+      {showFetchLoading && (
         <p className="mb-4 text-sm text-muted-foreground" role="status">
           載入中…
         </p>
       )}
-      {loadError && (
+      {displayLoadError && (
         <div
           className="mb-4 flex items-start justify-between gap-2 text-sm text-destructive"
           role="alert"
         >
-          <p>{loadError}</p>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-destructive"
-            onClick={() => setLoadError(null)}
-            aria-label="關閉錯誤訊息"
-          >
-            <XIcon className="h-4 w-4" />
-          </Button>
+          <p>{displayLoadError}</p>
+          {loadError ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 px-2 text-destructive"
+              onClick={() => setLoadError(null)}
+              aria-label="關閉錯誤訊息"
+            >
+              <XIcon className="h-4 w-4" />
+            </Button>
+          ) : null}
         </div>
       )}
 
@@ -480,7 +487,7 @@ function OrderDetailPage() {
                       }
                       if (
                         value === "已出貨" &&
-                        watch("paymentStatus") !== "已入帳"
+                        getValues("paymentStatus") !== "已入帳"
                       ) {
                         setSaveError(
                           "收款狀態尚未入帳，不能將商品狀態改為已出貨"

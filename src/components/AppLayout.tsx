@@ -3,8 +3,8 @@ import {
   NavigationMenu,
   NavigationMenuItem,
   NavigationMenuList,
-  navigationMenuTriggerStyle,
 } from "@/components/ui/navigation-menu";
+import { navigationMenuTriggerStyle } from "@/components/ui/navigation-menu-trigger-style";
 import Button from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/auth/useAuth";
