@@ -5,12 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import {
-  ArrowUpDownIcon,
-  EyeIcon,
-  Trash2Icon,
-  XIcon,
-} from "lucide-react";
+import { ArrowUpDownIcon, EyeIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useQueryStates } from "nuqs";
 import { Link } from "react-router-dom";
 import CreateOrderDialog from "@/pages/OrdersPage/components/CreateOrderDialog";
@@ -119,7 +114,7 @@ async function syncOrdersListViewCache(
       sortPurchaseDate: listUrl.sort,
       page: listUrl.page,
       pageSize: ORDERS_PAGE_SIZE,
-    }),
+    })
   );
   queryClient.setQueryData<OrdersListQueryData>(ordersKeys.list(listUrl), {
     rows: (listRes.data ?? []).map(orderRecordToTableRow),
@@ -132,7 +127,7 @@ async function syncOrdersListViewCache(
       paymentStatus: listUrl.payment,
       productStatus: listUrl.product,
       packageNumber: listUrl.pkg,
-    }),
+    })
   );
   queryClient.setQueryData(ordersKeys.totalsForList(listUrl), {
     totalCost: totalsRes.totalCost,
@@ -215,7 +210,7 @@ function OrdersPage() {
           sortPurchaseDate: listUrl.sort,
           page: listUrl.page,
           pageSize: ORDERS_PAGE_SIZE,
-        }),
+        })
       );
       return {
         rows: (res.data ?? []).map(orderRecordToTableRow),
@@ -229,8 +224,7 @@ function OrdersPage() {
 
   const packageNumbersQuery = useQuery({
     queryKey: packagesKeys.numbers(),
-    queryFn: async () =>
-      unwrapResultOrThrow(await fetchPackageNumbersFromDb()),
+    queryFn: async () => unwrapResultOrThrow(await fetchPackageNumbersFromDb()),
   });
 
   const invalidateOrdersData = () => {
@@ -431,7 +425,7 @@ function OrdersPage() {
       { packageNumber: bulkPackageNumber },
       async (id) => {
         unwrapResultOrThrow(
-          await updateOrderFields(id, { packageNumber: bulkPackageNumber }),
+          await updateOrderFields(id, { packageNumber: bulkPackageNumber })
         );
       }
     );
@@ -477,7 +471,7 @@ function OrdersPage() {
       { paymentStatus: bulkPaymentStatus },
       async (id) => {
         unwrapResultOrThrow(
-          await updateOrderFields(id, { paymentStatus: bulkPaymentStatus }),
+          await updateOrderFields(id, { paymentStatus: bulkPaymentStatus })
         );
       }
     );
@@ -543,7 +537,7 @@ function OrdersPage() {
       { productStatus: bulkProductStatus },
       async (id) => {
         unwrapResultOrThrow(
-          await updateOrderFields(id, { productStatus: bulkProductStatus }),
+          await updateOrderFields(id, { productStatus: bulkProductStatus })
         );
       }
     );
@@ -833,7 +827,7 @@ function OrdersPage() {
                             value === "已收款" ||
                             value === "已入帳"
                           ) {
-                            void persistListPatch(order.id, {
+                            persistListPatch(order.id, {
                               paymentStatus: value,
                             });
                           }
