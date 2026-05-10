@@ -788,7 +788,15 @@ function OrdersPage() {
                         aria-label={`選擇訂單 ${order.id}`}
                       />
                     </TableCell>
-                    <TableCell>{order.item}</TableCell>
+                    <TableCell
+                      className={
+                        order.productStatus === "未購買"
+                          ? "font-medium text-red-500"
+                          : undefined
+                      }
+                    >
+                      {order.item}
+                    </TableCell>
                     <TableCell>{order.quantity}</TableCell>
                     <TableCell>{order.purchaseDate}</TableCell>
                     <TableCell>{order.buyer}</TableCell>
