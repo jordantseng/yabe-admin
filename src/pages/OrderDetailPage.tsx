@@ -73,7 +73,6 @@ function OrderDetailPage() {
 
   const watchedCost = watch("cost");
   const watchedPrice = watch("price");
-  const watchedDomesticShippingFee = watch("domesticShippingFee");
   const watchedRevenue = watch("revenue");
   const packageNumbersQuery = useQuery({
     queryKey: packagesKeys.numbers(),
@@ -86,23 +85,14 @@ function OrderDetailPage() {
   useEffect(() => {
     const price = Number.isFinite(watchedPrice) ? watchedPrice : 0;
     const cost = Number.isFinite(watchedCost) ? watchedCost : 0;
-    const fee = Number.isFinite(watchedDomesticShippingFee)
-      ? watchedDomesticShippingFee
-      : 0;
-    const nextRevenue = price - cost - fee;
+    const nextRevenue = price - cost;
     if (
       !Number.isFinite(watchedRevenue) ||
       nextRevenue !== watchedRevenue
     ) {
       setValue("revenue", nextRevenue, { shouldDirty: true });
     }
-  }, [
-    watchedCost,
-    watchedPrice,
-    watchedDomesticShippingFee,
-    watchedRevenue,
-    setValue,
-  ]);
+  }, [watchedCost, watchedPrice, watchedRevenue, setValue]);
 
   const packageNumberOptions = packageNumbersQuery.data ?? [];
 
