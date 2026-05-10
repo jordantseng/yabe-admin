@@ -20,7 +20,7 @@ export function FormField({
   errorId,
 }: FormFieldProps) {
   return (
-    <label className={cn("space-y-1", className)}>
+    <label className={cn("block w-full space-y-1", className)}>
       <span className="block text-sm font-medium">
         {label}
         {requiredMark ? (
