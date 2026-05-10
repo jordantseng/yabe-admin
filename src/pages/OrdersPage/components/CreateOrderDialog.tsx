@@ -24,6 +24,7 @@ import {
 import { createOrder } from "@/lib/orders";
 import { fetchPackageNumbersFromDb } from "@/lib/packages";
 import { ordersKeys, packagesKeys } from "@/lib/queryKeys";
+import { unwrapResultOrThrow } from "@/lib/result-utils";
 
 const REQUIRED_MSG = "此欄位為必填";
 
@@ -87,15 +88,14 @@ export default function CreateOrderDialog({
   const [createOrderError, setCreateOrderError] = useState<string | null>(null);
   const packageNumbersQuery = useQuery({
     queryKey: packagesKeys.numbers(),
-    queryFn: async () => {
-      const res = await fetchPackageNumbersFromDb();
-      return res.data;
-    },
+    queryFn: async () =>
+      unwrapResultOrThrow(await fetchPackageNumbersFromDb()),
     placeholderData: (previousData) => previousData,
   });
   const packageNumberOptions = packageNumbersQuery.data ?? [];
   const createOrderMutation = useMutation({
-    mutationFn: createOrder,
+    mutationFn: async (input: Parameters<typeof createOrder>[0]) =>
+      unwrapResultOrThrow(await createOrder(input)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ordersKeys.lists() });
       queryClient.invalidateQueries({ queryKey: ordersKeys.totals() });

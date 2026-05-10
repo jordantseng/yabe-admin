@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { fetchPackageNumbersFromDb } from "@/lib/packages";
+import { unwrapResultOrThrow } from "@/lib/result-utils";
 import { ordersKeys, packagesKeys } from "@/lib/queryKeys";
 
 const REQUIRED_MSG = "此欄位為必填";
@@ -76,13 +77,14 @@ function OrderDetailPage() {
 
   const watchedCost = useWatch({ control, name: "cost", defaultValue: 0 });
   const watchedPrice = useWatch({ control, name: "price", defaultValue: 0 });
-  const watchedRevenue = useWatch({ control, name: "revenue", defaultValue: 0 });
+  const watchedRevenue = useWatch({
+    control,
+    name: "revenue",
+    defaultValue: 0,
+  });
   const packageNumbersQuery = useQuery({
     queryKey: packagesKeys.numbers(),
-    queryFn: async () => {
-      const res = await fetchPackageNumbersFromDb();
-      return res.data;
-    },
+    queryFn: async () => unwrapResultOrThrow(await fetchPackageNumbersFromDb()),
   });
 
   useEffect(() => {
@@ -99,8 +101,7 @@ function OrderDetailPage() {
   const orderIdMissing = !orderId;
   const displayLoadError = orderIdMissing ? "缺少訂單編號" : loadError;
   const showFetchLoading = Boolean(orderId && isLoading);
-  const formDisabled =
-    orderIdMissing || showFetchLoading || !!loadError;
+  const formDisabled = orderIdMissing || showFetchLoading || !!loadError;
 
   useEffect(() => {
     if (!orderId) {
@@ -109,26 +110,24 @@ function OrderDetailPage() {
 
     let cancelled = false;
 
-    void (async () => {
+    (async () => {
       if (cancelled) {
         return;
       }
       setLoadError(null);
       setIsLoading(true);
-      let data: Awaited<ReturnType<typeof fetchOrderById>>["data"];
-      try {
-        const res = await fetchOrderById(orderId);
-        data = res.data;
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
+      const orderRes = await fetchOrderById(orderId);
+      if (cancelled) {
+        return;
+      }
+      if (orderRes.isErr()) {
         setIsLoading(false);
-        setLoadError((error as Error).message);
+        setLoadError(orderRes.error.message);
         setIsPersistedShippedLocked(false);
         reset(emptyOrderDetailForm());
         return;
       }
+      const data = orderRes.value;
       if (cancelled) {
         return;
       }
@@ -155,23 +154,22 @@ function OrderDetailPage() {
     }
     setSaveError(null);
     setIsSaving(true);
-    const { data, error } = await updateOrderFromDetailForm(orderId, values);
+    const updateRes = await updateOrderFromDetailForm(orderId, values);
     setIsSaving(false);
-    if (error) {
-      setSaveError(error.message);
+    if (updateRes.isErr()) {
+      setSaveError(updateRes.error.message);
       return;
     }
-    if (data) {
-      const nextValues = orderRecordToDetailForm(data);
-      setIsPersistedShippedLocked(nextValues.productStatus === "已出貨");
-      reset(nextValues);
-      queryClient.invalidateQueries({ queryKey: ordersKeys.lists() });
-      queryClient.invalidateQueries({ queryKey: ordersKeys.totals() });
-      if (window.history.length > 1) {
-        navigate(-1);
-      } else {
-        navigate("/orders");
-      }
+    const data = updateRes.value;
+    const nextValues = orderRecordToDetailForm(data);
+    setIsPersistedShippedLocked(nextValues.productStatus === "已出貨");
+    reset(nextValues);
+    queryClient.invalidateQueries({ queryKey: ordersKeys.lists() });
+    queryClient.invalidateQueries({ queryKey: ordersKeys.totals() });
+    if (window.history.length > 1) {
+      navigate(-1);
+    } else {
+      navigate("/orders");
     }
   };
 
@@ -238,7 +236,11 @@ function OrderDetailPage() {
               />
             </FormField>
 
-            <FormField label="數量" requiredMark error={errors.quantity?.message}>
+            <FormField
+              label="數量"
+              requiredMark
+              error={errors.quantity?.message}
+            >
               <input
                 type="number"
                 min={1}
@@ -266,7 +268,11 @@ function OrderDetailPage() {
               />
             </FormField>
 
-            <FormField label="購買人" requiredMark error={errors.buyer?.message}>
+            <FormField
+              label="購買人"
+              requiredMark
+              error={errors.buyer?.message}
+            >
               <input
                 {...register("buyer", {
                   required: REQUIRED_MSG,
@@ -414,7 +420,10 @@ function OrderDetailPage() {
                   className="w-full rounded-md border border-input bg-muted px-3 py-2 text-sm"
                 />
               </FormField>
-              <FormField label="運費" error={errors.domesticShippingFee?.message}>
+              <FormField
+                label="運費"
+                error={errors.domesticShippingFee?.message}
+              >
                 <input
                   type="number"
                   {...register("domesticShippingFee", {

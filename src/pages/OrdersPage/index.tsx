@@ -56,6 +56,7 @@ import {
   type OrdersListUrlState,
 } from "@/lib/orders-list-url";
 import { fetchPackageNumbersFromDb } from "@/lib/packages";
+import { unwrapResultOrThrow } from "@/lib/result-utils";
 import { ordersKeys, packagesKeys } from "@/lib/queryKeys";
 
 const ORDERS_PAGE_SIZE = 12;
@@ -109,26 +110,30 @@ async function syncOrdersListViewCache(
   queryClient: QueryClient,
   listUrl: OrdersListUrlState
 ) {
-  const listRes = await fetchOrders({
-    itemSearch: listUrl.q || undefined,
-    paymentStatus: listUrl.payment,
-    productStatus: listUrl.product,
-    packageNumber: listUrl.pkg,
-    sortPurchaseDate: listUrl.sort,
-    page: listUrl.page,
-    pageSize: ORDERS_PAGE_SIZE,
-  });
+  const listRes = unwrapResultOrThrow(
+    await fetchOrders({
+      itemSearch: listUrl.q || undefined,
+      paymentStatus: listUrl.payment,
+      productStatus: listUrl.product,
+      packageNumber: listUrl.pkg,
+      sortPurchaseDate: listUrl.sort,
+      page: listUrl.page,
+      pageSize: ORDERS_PAGE_SIZE,
+    }),
+  );
   queryClient.setQueryData<OrdersListQueryData>(ordersKeys.list(listUrl), {
     rows: (listRes.data ?? []).map(orderRecordToTableRow),
     count: listRes.count,
   });
 
-  const totalsRes = await fetchOrdersTotals({
-    itemSearch: listUrl.q || undefined,
-    paymentStatus: listUrl.payment,
-    productStatus: listUrl.product,
-    packageNumber: listUrl.pkg,
-  });
+  const totalsRes = unwrapResultOrThrow(
+    await fetchOrdersTotals({
+      itemSearch: listUrl.q || undefined,
+      paymentStatus: listUrl.payment,
+      productStatus: listUrl.product,
+      packageNumber: listUrl.pkg,
+    }),
+  );
   queryClient.setQueryData(ordersKeys.totalsForList(listUrl), {
     totalCost: totalsRes.totalCost,
     totalProfit: totalsRes.totalProfit,
@@ -201,15 +206,17 @@ function OrdersPage() {
   const ordersQuery = useQuery({
     queryKey: ordersKeys.list(listUrl),
     queryFn: async () => {
-      const res = await fetchOrders({
-        itemSearch: listUrl.q || undefined,
-        paymentStatus: listUrl.payment,
-        productStatus: listUrl.product,
-        packageNumber: listUrl.pkg,
-        sortPurchaseDate: listUrl.sort,
-        page: listUrl.page,
-        pageSize: ORDERS_PAGE_SIZE,
-      });
+      const res = unwrapResultOrThrow(
+        await fetchOrders({
+          itemSearch: listUrl.q || undefined,
+          paymentStatus: listUrl.payment,
+          productStatus: listUrl.product,
+          packageNumber: listUrl.pkg,
+          sortPurchaseDate: listUrl.sort,
+          page: listUrl.page,
+          pageSize: ORDERS_PAGE_SIZE,
+        }),
+      );
       return {
         rows: (res.data ?? []).map(orderRecordToTableRow),
         count: res.count,
@@ -222,10 +229,8 @@ function OrdersPage() {
 
   const packageNumbersQuery = useQuery({
     queryKey: packagesKeys.numbers(),
-    queryFn: async () => {
-      const res = await fetchPackageNumbersFromDb();
-      return res.data;
-    },
+    queryFn: async () =>
+      unwrapResultOrThrow(await fetchPackageNumbersFromDb()),
   });
 
   const invalidateOrdersData = () => {
@@ -249,7 +254,7 @@ function OrdersPage() {
       orderId: string;
       patch: Parameters<typeof updateOrderFields>[1];
     }) => {
-      await updateOrderFields(orderId, patch);
+      unwrapResultOrThrow(await updateOrderFields(orderId, patch));
     },
     onMutate: async ({ orderId, patch }) => {
       await queryClient.cancelQueries({ queryKey: ordersKeys.lists() });
@@ -285,7 +290,7 @@ function OrdersPage() {
 
   const deleteOrderMutation = useMutation({
     mutationFn: async (orderId: string) => {
-      await deleteOrderById(orderId);
+      unwrapResultOrThrow(await deleteOrderById(orderId));
     },
     onSuccess: () => {
       invalidateOrdersData();
@@ -424,7 +429,11 @@ function OrdersPage() {
       listUrlRef.current,
       needUpdateIds,
       { packageNumber: bulkPackageNumber },
-      (id) => updateOrderFields(id, { packageNumber: bulkPackageNumber })
+      async (id) => {
+        unwrapResultOrThrow(
+          await updateOrderFields(id, { packageNumber: bulkPackageNumber }),
+        );
+      }
     );
     if (bulkResult.ok === false) {
       setListFieldError(bulkResult.message);
@@ -466,7 +475,11 @@ function OrdersPage() {
       listUrlRef.current,
       needUpdateIds,
       { paymentStatus: bulkPaymentStatus },
-      (id) => updateOrderFields(id, { paymentStatus: bulkPaymentStatus })
+      async (id) => {
+        unwrapResultOrThrow(
+          await updateOrderFields(id, { paymentStatus: bulkPaymentStatus }),
+        );
+      }
     );
     if (bulkResult.ok === false) {
       setListFieldError(bulkResult.message);
@@ -528,7 +541,11 @@ function OrdersPage() {
       listUrlRef.current,
       needUpdateIds,
       { productStatus: bulkProductStatus },
-      (id) => updateOrderFields(id, { productStatus: bulkProductStatus })
+      async (id) => {
+        unwrapResultOrThrow(
+          await updateOrderFields(id, { productStatus: bulkProductStatus }),
+        );
+      }
     );
     if (bulkResult.ok === false) {
       setListFieldError(bulkResult.message);

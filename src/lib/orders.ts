@@ -1,4 +1,6 @@
+import { err, ok, type Result } from "neverthrow";
 import { supabase } from "@/lib/supabase";
+import type { ServiceError } from "@/lib/service-error";
 import type { OrderRow as OrderRecord } from "@/types/database";
 
 /** Order row from `select('*, packages(number)')`. */
@@ -181,12 +183,12 @@ export type FetchOrdersTotalsResult = {
 
 export async function fetchOrdersTotals(
   options: FetchOrdersOptions = {},
-): Promise<FetchOrdersTotalsResult> {
+): Promise<Result<FetchOrdersTotalsResult, ServiceError>> {
   let query = supabase.from("orders").select("cost, price");
   query = applyOrderListFilters(query, options);
   const { data, error } = await query;
 
-  if (error) throw new Error(error.message);
+  if (error) return err({ message: error.message });
 
   let totalCost = 0;
   let totalProfit = 0;
@@ -195,7 +197,7 @@ export async function fetchOrdersTotals(
     totalCost += Number.isNaN(c) ? 0 : c;
     totalProfit += revenueFromCostPrice(row.cost, row.price);
   }
-  return { totalCost, totalProfit };
+  return ok({ totalCost, totalProfit });
 }
 
 export type CreateOrderInput = {
@@ -216,9 +218,9 @@ export type CreateOrderInput = {
   packageNumber: string;
 };
 
-export async function createOrder(input: CreateOrderInput): Promise<{
-  data: OrderRecord;
-}> {
+export async function createOrder(
+  input: CreateOrderInput,
+): Promise<Result<OrderRecord, ServiceError>> {
   const purchaseDate =
     input.purchaseDate.trim().slice(0, 10) ||
     new Date().toISOString().slice(0, 10);
@@ -247,16 +249,15 @@ export async function createOrder(input: CreateOrderInput): Promise<{
     .select()
     .single();
 
-  if (error) throw new Error(error.message);
-  return { data: data as OrderRecord };
+  if (error) return err({ message: error.message });
+  return ok(data as OrderRecord);
 }
 
 export async function fetchOrders(
   options: FetchOrdersOptions = {},
-): Promise<{
-  data: OrderRecord[];
-  count: number;
-}> {
+): Promise<
+  Result<{ data: OrderRecord[]; count: number }, ServiceError>
+> {
   const sortDir = options.sortPurchaseDate ?? "desc";
   const ascending = sortDir === "asc";
   const page = Math.max(1, options.page ?? 1);
@@ -273,11 +274,11 @@ export async function fetchOrders(
 
   const { data, error, count } = await query;
 
-  if (error) throw new Error(error.message);
-  return {
+  if (error) return err({ message: error.message });
+  return ok({
     data: (data as OrderRecord[] | null) ?? [],
     count: count ?? 0,
-  };
+  });
 }
 
 export type FetchOrdersForPackagePageOptions = {
@@ -308,11 +309,16 @@ type PkgListRow = {
  */
 export async function fetchOrdersForPackagePage(
   options: FetchOrdersForPackagePageOptions = {},
-): Promise<{
-  data: OrderWithPackageNumber[];
-  count: number;
-  emptyPackageStubs: PackagePageEmptyPackageStub[];
-}> {
+): Promise<
+  Result<
+    {
+      data: OrderWithPackageNumber[];
+      count: number;
+      emptyPackageStubs: PackagePageEmptyPackageStub[];
+    },
+    ServiceError
+  >
+> {
   const raw = options.packageFilter?.trim() ?? "全部";
   const pkgFilter = raw === "未指定" ? "全部" : raw;
   const page = Math.max(1, options.page ?? 1);
@@ -322,7 +328,7 @@ export async function fetchOrdersForPackagePage(
     .from("packages")
     .select("id, number, notes, international_shipping_fee, is_settled, created_at");
   if (pkgsError) {
-    throw new Error(pkgsError.message);
+    return err({ message: pkgsError.message });
   }
 
   const pkgRows = ((pkgs ?? []) as PkgListRow[]).slice().sort((a, b) => {
@@ -376,11 +382,11 @@ export async function fetchOrdersForPackagePage(
       internationalShippingFee: p.international_shipping_fee ?? 0,
       isSettled: p.is_settled === true,
     }));
-    return {
+    return ok({
       data: [],
       count: packageCountForPagination,
       emptyPackageStubs: emptyStubs,
-    };
+    });
   }
 
   let query = supabase
@@ -405,7 +411,7 @@ export async function fetchOrdersForPackagePage(
 
   const { data, error } = await query;
 
-  if (error) throw new Error(error.message);
+  if (error) return err({ message: error.message });
 
   const pageNumSet = new Set(pagePackages.map((p) => String(p.number)));
   const pageIdSet = new Set(pagePackages.map((p) => p.id));
@@ -450,11 +456,11 @@ export async function fetchOrdersForPackagePage(
     }
   }
 
-  return {
+  return ok({
     data: sorted,
     count: packageCountForPagination,
     emptyPackageStubs,
-  };
+  });
 }
 
 export type OrderListFieldsPatch = {
@@ -467,7 +473,7 @@ export type OrderListFieldsPatch = {
 export async function updateOrderFields(
   orderId: string,
   patch: OrderListFieldsPatch,
-): Promise<void> {
+): Promise<Result<void, ServiceError>> {
   const needsExistingStateCheck = patch.productStatus !== undefined;
   const needsProductStatusCheck = patch.productStatus === "已出貨";
   const isLockedFieldPatch =
@@ -480,18 +486,22 @@ export async function updateOrderFields(
       .select("product_status, payment_status")
       .eq("id", orderId)
       .single();
-    if (existingError) throw new Error(existingError.message);
+    if (existingError) return err({ message: existingError.message });
     if (existing?.product_status === "已出貨") {
       if (
         patch.productStatus !== undefined &&
         patch.productStatus !== existing.product_status
       ) {
-        throw new Error("商品狀態已出貨後不可再修改");
+        return err({ message: "商品狀態已出貨後不可再修改" });
       }
-      throw new Error("商品狀態已出貨，不能修改付款人、收款狀態或包裹編號");
+      return err({
+        message: "商品狀態已出貨，不能修改付款人、收款狀態或包裹編號",
+      });
     }
     if (needsProductStatusCheck && existing?.payment_status !== "已入帳") {
-      throw new Error("收款狀態尚未入帳，不能將商品狀態改為已出貨");
+      return err({
+        message: "收款狀態尚未入帳，不能將商品狀態改為已出貨",
+      });
     }
   }
 
@@ -513,8 +523,10 @@ export async function updateOrderFields(
           .select("id")
           .eq("number", asInt)
           .maybeSingle();
-        if (pkgErr) throw new Error(pkgErr.message);
-        if (!pkgRow) throw new Error(`找不到包裹編號 ${packageNumber}`);
+        if (pkgErr) return err({ message: pkgErr.message });
+        if (!pkgRow) {
+          return err({ message: `找不到包裹編號 ${packageNumber}` });
+        }
         row.package_id = pkgRow.id;
       } else {
         row.package_id = null;
@@ -522,22 +534,23 @@ export async function updateOrderFields(
     }
   }
 
-  if (Object.keys(row).length === 0) return;
+  if (Object.keys(row).length === 0) return ok(undefined);
 
   const { error } = await supabase.from("orders").update(row).eq("id", orderId);
-  if (error) throw new Error(error.message);
+  if (error) return err({ message: error.message });
+  return ok(undefined);
 }
 
 export async function updateOrderFromDetailForm(
   orderId: string,
   values: OrderDetailFormValues,
-): Promise<{ data: OrderRecord | null; error: { message: string } | null }> {
+): Promise<Result<OrderRecord, ServiceError>> {
   const { data: existing, error: existingError } = await supabase
     .from("orders")
     .select("product_status, payer, payment_status, package_number")
     .eq("id", orderId)
     .single();
-  if (existingError) return { data: null, error: { message: existingError.message } };
+  if (existingError) return err({ message: existingError.message });
 
   if (existing?.product_status === "已出貨") {
     const nextPackageNumber = values.packageNumber.trim();
@@ -547,24 +560,19 @@ export async function updateOrderFromDetailForm(
       existing.package_number !== nextPackageNumber;
     const hasProductStatusChanged = values.productStatus !== existing.product_status;
     if (hasProductStatusChanged) {
-      return {
-        data: null,
-        error: { message: "商品狀態已出貨後不可再修改" },
-      };
+      return err({ message: "商品狀態已出貨後不可再修改" });
     }
     if (hasLockedFieldChanged) {
-      return {
-        data: null,
-        error: { message: "商品狀態已出貨，不能修改付款人、收款狀態或包裹編號" },
-      };
+      return err({
+        message: "商品狀態已出貨，不能修改付款人、收款狀態或包裹編號",
+      });
     }
   }
 
   if (values.productStatus === "已出貨" && values.paymentStatus !== "已入帳") {
-    return {
-      data: null,
-      error: { message: "收款狀態尚未入帳，不能將商品狀態改為已出貨" },
-    };
+    return err({
+      message: "收款狀態尚未入帳，不能將商品狀態改為已出貨",
+    });
   }
 
   const purchaseDate =
@@ -580,9 +588,9 @@ export async function updateOrderFromDetailForm(
         .select("id")
         .eq("number", asInt)
         .maybeSingle();
-      if (pkgErr) return { data: null, error: { message: pkgErr.message } };
+      if (pkgErr) return err({ message: pkgErr.message });
       if (!pkgRow) {
-        return { data: null, error: { message: `找不到包裹編號 ${packageNumber}` } };
+        return err({ message: `找不到包裹編號 ${packageNumber}` });
       }
       packageId = pkgRow.id;
     }
@@ -618,27 +626,27 @@ export async function updateOrderFromDetailForm(
     .select()
     .single();
 
-  if (error) return { data: null, error: { message: error.message } };
-  return { data: data as OrderRecord, error: null };
+  if (error) return err({ message: error.message });
+  return ok(data as OrderRecord);
 }
 
-export async function deleteOrderById(orderId: string): Promise<{
-  ok: true;
-}> {
+export async function deleteOrderById(
+  orderId: string,
+): Promise<Result<void, ServiceError>> {
   const { error } = await supabase.from("orders").delete().eq("id", orderId);
-  if (error) throw new Error(error.message);
-  return { ok: true };
+  if (error) return err({ message: error.message });
+  return ok(undefined);
 }
 
-export async function fetchOrderById(orderId: string): Promise<{
-  data: OrderRecord | null;
-}> {
+export async function fetchOrderById(
+  orderId: string,
+): Promise<Result<OrderRecord | null, ServiceError>> {
   const { data, error } = await supabase
     .from("orders")
     .select("*")
     .eq("id", orderId)
     .maybeSingle();
 
-  if (error) throw new Error(error.message);
-  return { data: data as OrderRecord | null };
+  if (error) return err({ message: error.message });
+  return ok(data as OrderRecord | null);
 }

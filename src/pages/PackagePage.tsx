@@ -76,6 +76,7 @@ import type {
   OrderProductStatus,
 } from "@/types/database";
 import { packagesKeys } from "@/lib/queryKeys";
+import { unwrapResultOrThrow } from "@/lib/result-utils";
 
 /** 每頁顯示 1 個包裹（排序新→舊） */
 const PACKAGE_GROUPS_PER_PAGE = 1;
@@ -270,14 +271,16 @@ async function syncPackageRowsCache(
   listUrl: PackagesListUrlState,
 ) {
   try {
-    const res = await fetchOrdersForPackagePage({
-      itemSearch: listUrl.q,
-      packageFilter: listUrl.pkg,
-      productStatus: listUrl.product,
-      payer: listUrl.payer,
-      page: listUrl.page,
-      packagesPerPage: PACKAGE_GROUPS_PER_PAGE,
-    });
+    const res = unwrapResultOrThrow(
+      await fetchOrdersForPackagePage({
+        itemSearch: listUrl.q,
+        packageFilter: listUrl.pkg,
+        productStatus: listUrl.product,
+        payer: listUrl.payer,
+        page: listUrl.page,
+        packagesPerPage: PACKAGE_GROUPS_PER_PAGE,
+      }),
+    );
     queryClient.setQueryData<PackageRowsQueryData>(
       packageRowsQueryKey(listUrl),
       {
@@ -317,9 +320,11 @@ async function runBulkPackagePageProductStatusUpdates(
   );
   try {
     await Promise.all(
-      updatableIds.map((id) =>
-        updateOrderFields(id, { productStatus }),
-      ),
+      updatableIds.map(async (id) => {
+        unwrapResultOrThrow(
+          await updateOrderFields(id, { productStatus }),
+        );
+      }),
     );
   } catch (error) {
     for (const [key, data] of previousEntries) {
@@ -384,14 +389,16 @@ function PackagePage() {
   const rowsQuery = useQuery({
     queryKey: packageRowsQueryKey(listUrl),
     queryFn: async () => {
-      const res = await fetchOrdersForPackagePage({
-        itemSearch: listUrl.q,
-        packageFilter: listUrl.pkg,
-        productStatus: listUrl.product,
-        payer: listUrl.payer,
-        page: listUrl.page,
-        packagesPerPage: PACKAGE_GROUPS_PER_PAGE,
-      });
+      const res = unwrapResultOrThrow(
+        await fetchOrdersForPackagePage({
+          itemSearch: listUrl.q,
+          packageFilter: listUrl.pkg,
+          productStatus: listUrl.product,
+          payer: listUrl.payer,
+          page: listUrl.page,
+          packagesPerPage: PACKAGE_GROUPS_PER_PAGE,
+        }),
+      );
       return {
         rows: (res.data ?? []).map(orderToPackageTableRow),
         count: res.count,
@@ -403,26 +410,25 @@ function PackagePage() {
 
   const packageNumbersQuery = useQuery({
     queryKey: packagesKeys.numbers(),
-    queryFn: async () => {
-      const res = await fetchPackageNumbersFromDb();
-      return res.data;
-    },
+    queryFn: async () =>
+      unwrapResultOrThrow(await fetchPackageNumbersFromDb()),
   });
 
   const nextPackageNumberQuery = useQuery({
     queryKey: packagesKeys.nextNumberPeek(),
     queryFn: async () => {
-      const res = await peekNextPackageNumber();
-      if (res.data == null) {
+      const res = unwrapResultOrThrow(await peekNextPackageNumber());
+      if (res == null) {
         throw new Error("無法取得下一個包裹編號");
       }
-      return res.data;
+      return res;
     },
     enabled: isCreatePackageDialogOpen,
   });
 
   const createPackageMutation = useMutation({
-    mutationFn: createPackage,
+    mutationFn: async (input: Parameters<typeof createPackage>[0]) =>
+      unwrapResultOrThrow(await createPackage(input)),
     onSuccess: async () => {
       void queryClient.invalidateQueries({
         queryKey: packagesKeys.numbers(),
@@ -438,7 +444,7 @@ function PackagePage() {
       id: string;
       patch: Parameters<typeof updateOrderFields>[1];
     }) => {
-      await updateOrderFields(args.id, args.patch);
+      unwrapResultOrThrow(await updateOrderFields(args.id, args.patch));
     },
     onMutate: async ({ id, patch }) => {
       await queryClient.cancelQueries({ queryKey: packagesKeys.pageRows() });
@@ -473,10 +479,12 @@ function PackagePage() {
   });
   const editPackageFeeMutation = useMutation({
     mutationFn: async (args: { pkg: string; fee: number; notes: string }) => {
-      await updatePackageInternationalShippingFeeByNumber(
-        args.pkg,
-        args.fee,
-        args.notes,
+      unwrapResultOrThrow(
+        await updatePackageInternationalShippingFeeByNumber(
+          args.pkg,
+          args.fee,
+          args.notes,
+        ),
       );
     },
     onSuccess: async () => {
@@ -485,7 +493,7 @@ function PackagePage() {
   });
   const settlePackageMutation = useMutation({
     mutationFn: async (pkg: string) => {
-      await settlePackageByNumber(pkg);
+      unwrapResultOrThrow(await settlePackageByNumber(pkg));
     },
     onSuccess: async () => {
       await syncPackageRowsCache(queryClient, listUrlRef.current);

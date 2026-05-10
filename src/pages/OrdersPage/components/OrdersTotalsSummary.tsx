@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import Skeleton from "@/components/ui/skeleton";
 import { fetchOrdersTotals } from "@/lib/orders";
 import { type OrdersListUrlState } from "@/lib/orders-list-url";
+import { unwrapResultOrThrow } from "@/lib/result-utils";
 import { ordersKeys } from "@/lib/queryKeys";
 
 type OrdersTotalsSummaryProps = {
@@ -12,12 +13,14 @@ export default function OrdersTotalsSummary({ listUrl }: OrdersTotalsSummaryProp
   const totalsQuery = useQuery({
     queryKey: ordersKeys.totalsForList(listUrl),
     queryFn: async () => {
-      const res = await fetchOrdersTotals({
-        itemSearch: listUrl.q || undefined,
-        paymentStatus: listUrl.payment,
-        productStatus: listUrl.product,
-        packageNumber: listUrl.pkg,
-      });
+      const res = unwrapResultOrThrow(
+        await fetchOrdersTotals({
+          itemSearch: listUrl.q || undefined,
+          paymentStatus: listUrl.payment,
+          productStatus: listUrl.product,
+          packageNumber: listUrl.pkg,
+        }),
+      );
       return { totalCost: res.totalCost, totalProfit: res.totalProfit };
     },
     placeholderData: (previousData) => previousData,
