@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Controller, useForm } from "react-hook-form";
 import { XIcon } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
@@ -18,7 +18,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { fetchPackageNumbersFromDb } from "@/lib/packages";
-import { packagesKeys } from "@/lib/queryKeys";
+import { ordersKeys, packagesKeys } from "@/lib/queryKeys";
 
 const REQUIRED_MSG = "此欄位為必填";
 
@@ -51,13 +51,15 @@ function emptyOrderDetailForm(): OrderDetailFormValues {
 }
 
 function OrderDetailPage() {
+  const queryClient = useQueryClient();
   const { orderId } = useParams();
   const navigate = useNavigate();
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [isPersistedShippedLocked, setIsPersistedShippedLocked] = useState(false);
+  const [isPersistedShippedLocked, setIsPersistedShippedLocked] =
+    useState(false);
 
   const {
     register,
@@ -86,10 +88,7 @@ function OrderDetailPage() {
     const price = Number.isFinite(watchedPrice) ? watchedPrice : 0;
     const cost = Number.isFinite(watchedCost) ? watchedCost : 0;
     const nextRevenue = price - cost;
-    if (
-      !Number.isFinite(watchedRevenue) ||
-      nextRevenue !== watchedRevenue
-    ) {
+    if (!Number.isFinite(watchedRevenue) || nextRevenue !== watchedRevenue) {
       setValue("revenue", nextRevenue, { shouldDirty: true });
     }
   }, [watchedCost, watchedPrice, watchedRevenue, setValue]);
@@ -158,6 +157,8 @@ function OrderDetailPage() {
       const nextValues = orderRecordToDetailForm(data);
       setIsPersistedShippedLocked(nextValues.productStatus === "已出貨");
       reset(nextValues);
+      queryClient.invalidateQueries({ queryKey: ordersKeys.lists() });
+      queryClient.invalidateQueries({ queryKey: ordersKeys.totals() });
       if (window.history.length > 1) {
         navigate(-1);
       } else {
@@ -238,13 +239,18 @@ function OrderDetailPage() {
                   required: REQUIRED_MSG,
                   valueAsNumber: true,
                   validate: (v) =>
-                    (Number.isFinite(v) && v >= 1) || "請輸入有效的數量（至少為 1）",
+                    (Number.isFinite(v) && v >= 1) ||
+                    "請輸入有效的數量（至少為 1）",
                 })}
                 className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
               />
             </Field>
 
-            <Field label="購買日期" requiredMark error={errors.purchaseDate?.message}>
+            <Field
+              label="購買日期"
+              requiredMark
+              error={errors.purchaseDate?.message}
+            >
               <input
                 type="date"
                 {...register("purchaseDate", { required: REQUIRED_MSG })}
@@ -428,27 +434,29 @@ function OrderDetailPage() {
                   <Select
                     disabled={formDisabled || isPersistedShippedLocked}
                     value={field.value}
-                    onValueChange={(value)=> {
+                    onValueChange={(value) => {
                       if (isPersistedShippedLocked) return;
                       if (value) field.onChange(value);
                     }}
                   >
-                  <SelectTrigger
-                    className={`w-full ${paymentStatusTextClass(field.value)}`}
-                    aria-label="收款狀態"
-                  >
+                    <SelectTrigger
+                      className={`w-full ${paymentStatusTextClass(
+                        field.value
+                      )}`}
+                      aria-label="收款狀態"
+                    >
                       <SelectValue placeholder="收款狀態" />
                     </SelectTrigger>
                     <SelectContent>
-                    <SelectItem value="未收款" className="text-red-500">
-                      未收款
-                    </SelectItem>
-                    <SelectItem value="已收款" className="text-amber-500">
-                      已收款
-                    </SelectItem>
-                    <SelectItem value="已入帳" className="text-green-500">
-                      已入帳
-                    </SelectItem>
+                      <SelectItem value="未收款" className="text-red-500">
+                        未收款
+                      </SelectItem>
+                      <SelectItem value="已收款" className="text-amber-500">
+                        已收款
+                      </SelectItem>
+                      <SelectItem value="已入帳" className="text-green-500">
+                        已入帳
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 )}
@@ -469,8 +477,13 @@ function OrderDetailPage() {
                         setSaveError("商品狀態已出貨後不可再修改");
                         return;
                       }
-                      if (value === "已出貨" && watch("paymentStatus") !== "已入帳") {
-                        setSaveError("收款狀態尚未入帳，不能將商品狀態改為已出貨");
+                      if (
+                        value === "已出貨" &&
+                        watch("paymentStatus") !== "已入帳"
+                      ) {
+                        setSaveError(
+                          "收款狀態尚未入帳，不能將商品狀態改為已出貨"
+                        );
                         return;
                       }
                       if (value) field.onChange(value);
