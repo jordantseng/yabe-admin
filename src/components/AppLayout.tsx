@@ -4,7 +4,7 @@ import {
   NavigationMenuItem,
   NavigationMenuList,
 } from "@/components/ui/navigation-menu";
-import { navigationMenuTriggerStyle } from "@/components/ui/navigation-menu-trigger-style";
+import { navigationMenuTriggerStyle } from "@/components/ui/navigation-menu/navigation-menu-trigger-style";
 import Button from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/auth/useAuth";

@@ -1,7 +1,7 @@
 import { NavigationMenu as NavigationMenuPrimitive } from "@base-ui/react/navigation-menu"
 
 import { cn } from "@/lib/utils"
-import { navigationMenuTriggerStyle } from "@/components/ui/navigation-menu-trigger-style"
+import { navigationMenuTriggerStyle } from "@/components/ui/navigation-menu/navigation-menu-trigger-style"
 import { ChevronDownIcon } from "lucide-react"
 
 function NavigationMenu({
