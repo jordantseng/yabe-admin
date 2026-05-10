@@ -1,9 +1,12 @@
 import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { useLocation, useNavigate } from "react-router-dom";
+import { FormField } from "@/components/FormField";
 import Button from "@/components/ui/button";
 import Input from "@/components/ui/input";
 import { useAuth } from "@/auth/useAuth";
+
+const REQUIRED_MSG = "此欄位為必填";
 
 type LoginForm = {
   email: string;
@@ -21,7 +24,7 @@ function LoginPage() {
   const {
     register,
     handleSubmit,
-    formState: { isSubmitting },
+    formState: { errors, isSubmitting },
   } = useForm<LoginForm>({
     defaultValues: { email: "", password: "" },
   });
@@ -46,32 +49,64 @@ function LoginPage() {
           <h1 className="text-xl font-semibold">登入</h1>
         </div>
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-          <div className="space-y-1">
-            <label htmlFor="login-email" className="text-sm font-medium">
-              Email
-            </label>
+          <FormField
+            label="Email"
+            requiredMark
+            error={errors.email?.message}
+            errorId="login-email-error"
+          >
             <Input
               id="login-email"
               type="email"
               autoComplete="email"
-              aria-invalid={!!formError}
-              {...register("email", { required: true })}
+              aria-invalid={
+                !!errors.email || !!formError ? true : undefined
+              }
+              aria-describedby={
+                errors.email
+                  ? "login-email-error"
+                  : formError
+                    ? "login-form-error"
+                    : undefined
+              }
+              {...register("email", {
+                required: REQUIRED_MSG,
+                validate: (v) => v.trim() !== "" || REQUIRED_MSG,
+              })}
             />
-          </div>
-          <div className="space-y-1">
-            <label htmlFor="login-password" className="text-sm font-medium">
-              密碼
-            </label>
+          </FormField>
+          <FormField
+            label="密碼"
+            requiredMark
+            error={errors.password?.message}
+            errorId="login-password-error"
+          >
             <Input
               id="login-password"
               type="password"
               autoComplete="current-password"
-              aria-invalid={!!formError}
-              {...register("password", { required: true })}
+              aria-invalid={
+                !!errors.password || !!formError ? true : undefined
+              }
+              aria-describedby={
+                errors.password
+                  ? "login-password-error"
+                  : formError
+                    ? "login-form-error"
+                    : undefined
+              }
+              {...register("password", {
+                required: REQUIRED_MSG,
+                validate: (v) => v.trim() !== "" || REQUIRED_MSG,
+              })}
             />
-          </div>
+          </FormField>
           {formError && (
-            <p className="text-sm text-destructive" role="alert">
+            <p
+              id="login-form-error"
+              className="text-sm text-destructive"
+              role="alert"
+            >
               {formError}
             </p>
           )}
