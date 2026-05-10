@@ -11,7 +11,7 @@ export type FormFieldProps = {
   errorId?: string;
 };
 
-export function FormField({
+function FormField({
   label,
   children,
   requiredMark,
@@ -42,3 +42,5 @@ export function FormField({
     </label>
   );
 }
+
+export default FormField;

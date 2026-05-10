@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Controller, useForm } from "react-hook-form";
 import Button from "@/components/ui/button";
-import { FormField } from "@/components/FormField";
+import FormField from "@/components/FormField";
 import { cn } from "@/lib/utils";
 import {
   Dialog,

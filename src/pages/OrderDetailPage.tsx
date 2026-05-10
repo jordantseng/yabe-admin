@@ -4,7 +4,7 @@ import { Controller, useForm, useWatch } from "react-hook-form";
 import { XIcon } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import Button from "@/components/ui/button";
-import { FormField } from "@/components/FormField";
+import FormField from "@/components/FormField";
 import {
   fetchOrderById,
   orderRecordToDetailForm,
