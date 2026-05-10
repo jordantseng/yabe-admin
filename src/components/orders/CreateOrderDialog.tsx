@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Controller, useForm } from "react-hook-form";
 import Button from "@/components/ui/button";
+import { FormField } from "@/components/FormField";
 import { cn } from "@/lib/utils";
 import {
   Dialog,
@@ -194,16 +195,13 @@ export default function CreateOrderDialog({
                 訂單資訊
               </p>
               <div className="grid min-w-0 gap-3 md:grid-cols-6">
-                <div className="space-y-1 md:col-span-5">
-                  <label
-                    htmlFor="new-order-item"
-                    className="text-sm font-medium"
-                  >
-                    品項
-                    <span className="text-destructive" aria-hidden="true">
-                      *
-                    </span>
-                  </label>
+                <FormField
+                  className="min-w-0 md:col-span-5"
+                  label="品項"
+                  requiredMark
+                  error={errors.item?.message}
+                  errorId="new-order-item-error"
+                >
                   <Input
                     id="new-order-item"
                     aria-invalid={errors.item ? true : undefined}
@@ -217,26 +215,13 @@ export default function CreateOrderDialog({
                     placeholder="品項"
                     aria-label="品項"
                   />
-                  {errors.item && (
-                    <p
-                      id="new-order-item-error"
-                      className="text-sm text-destructive"
-                      role="alert"
-                    >
-                      {errors.item.message}
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-1">
-                  <label
-                    htmlFor="new-order-quantity"
-                    className="text-sm font-medium"
-                  >
-                    數量
-                    <span className="text-destructive" aria-hidden="true">
-                      *
-                    </span>
-                  </label>
+                </FormField>
+                <FormField
+                  label="數量"
+                  requiredMark
+                  error={errors.quantity?.message}
+                  errorId="new-order-quantity-error"
+                >
                   <Input
                     id="new-order-quantity"
                     type="number"
@@ -261,26 +246,14 @@ export default function CreateOrderDialog({
                     placeholder="數量"
                     aria-label="數量"
                   />
-                  {errors.quantity && (
-                    <p
-                      id="new-order-quantity-error"
-                      className="text-sm text-destructive"
-                      role="alert"
-                    >
-                      {errors.quantity.message}
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-1 md:col-span-6">
-                  <label
-                    htmlFor="new-order-purchase-date"
-                    className="text-sm font-medium"
-                  >
-                    購買日期
-                    <span className="text-destructive" aria-hidden="true">
-                      *
-                    </span>
-                  </label>
+                </FormField>
+                <FormField
+                  className="md:col-span-6"
+                  label="購買日期"
+                  requiredMark
+                  error={errors.purchaseDate?.message}
+                  errorId="new-order-purchase-date-error"
+                >
                   <Input
                     id="new-order-purchase-date"
                     type="date"
@@ -293,26 +266,14 @@ export default function CreateOrderDialog({
                     {...register("purchaseDate", { required: REQUIRED_MSG })}
                     aria-label="購買日期"
                   />
-                  {errors.purchaseDate && (
-                    <p
-                      id="new-order-purchase-date-error"
-                      className="text-sm text-destructive"
-                      role="alert"
-                    >
-                      {errors.purchaseDate.message}
-                    </p>
-                  )}
-                </div>
-                <div className="min-w-0 space-y-1 md:col-span-3">
-                  <label
-                    htmlFor="new-order-buyer"
-                    className="text-sm font-medium"
-                  >
-                    購買人
-                    <span className="text-destructive" aria-hidden="true">
-                      *
-                    </span>
-                  </label>
+                </FormField>
+                <FormField
+                  className="min-w-0 md:col-span-3"
+                  label="購買人"
+                  requiredMark
+                  error={errors.buyer?.message}
+                  errorId="new-order-buyer-error"
+                >
                   <Input
                     id="new-order-buyer"
                     aria-invalid={errors.buyer ? true : undefined}
@@ -326,18 +287,12 @@ export default function CreateOrderDialog({
                     placeholder="購買人"
                     aria-label="購買人"
                   />
-                  {errors.buyer && (
-                    <p
-                      id="new-order-buyer-error"
-                      className="text-sm text-destructive"
-                      role="alert"
-                    >
-                      {errors.buyer.message}
-                    </p>
-                  )}
-                </div>
-                <div className="min-w-0 space-y-1 md:col-span-3">
-                  <label className="text-sm font-medium">付款人</label>
+                </FormField>
+                <FormField
+                  className="min-w-0 md:col-span-3"
+                  label="付款人"
+                  error={errors.payer?.message}
+                >
                   <Controller
                     control={control}
                     name="payer"
@@ -360,14 +315,12 @@ export default function CreateOrderDialog({
                       </Select>
                     )}
                   />
-                  {errors.payer && (
-                    <p className="text-sm text-destructive" role="alert">
-                      {errors.payer.message}
-                    </p>
-                  )}
-                </div>
-                <div className="min-w-0 space-y-1 md:col-span-6">
-                  <label className="text-sm font-medium">包裹編號</label>
+                </FormField>
+                <FormField
+                  className="min-w-0 md:col-span-6"
+                  label="包裹編號"
+                  error={errors.packageNumber?.message}
+                >
                   <Controller
                     control={control}
                     name="packageNumber"
@@ -397,19 +350,8 @@ export default function CreateOrderDialog({
                       </Select>
                     )}
                   />
-                  {errors.packageNumber && (
-                    <p className="text-sm text-destructive" role="alert">
-                      {errors.packageNumber.message}
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-1 md:col-span-6">
-                  <label
-                    htmlFor="new-order-notes"
-                    className="text-sm font-medium"
-                  >
-                    備註
-                  </label>
+                </FormField>
+                <FormField className="md:col-span-6" label="備註">
                   <textarea
                     id="new-order-notes"
                     {...register("notes")}
@@ -418,7 +360,7 @@ export default function CreateOrderDialog({
                     placeholder="備註"
                     aria-label="備註"
                   />
-                </div>
+                </FormField>
               </div>
             </section>
 
@@ -427,48 +369,30 @@ export default function CreateOrderDialog({
                 收件資訊
               </p>
               <div className="grid min-w-0 gap-3 md:grid-cols-2">
-                <div className="min-w-0 space-y-1">
-                  <label
-                    htmlFor="new-order-recipient-name"
-                    className="text-sm font-medium"
-                  >
-                    收件人
-                  </label>
+                <FormField className="min-w-0" label="收件人">
                   <Input
                     id="new-order-recipient-name"
                     {...register("recipientName")}
                     placeholder="收件人"
                     aria-label="收件人"
                   />
-                </div>
-                <div className="min-w-0 space-y-1">
-                  <label
-                    htmlFor="new-order-phone"
-                    className="text-sm font-medium"
-                  >
-                    電話
-                  </label>
+                </FormField>
+                <FormField className="min-w-0" label="電話">
                   <Input
                     id="new-order-phone"
                     {...register("phone")}
                     placeholder="電話"
                     aria-label="電話"
                   />
-                </div>
-                <div className="space-y-1 md:col-span-2">
-                  <label
-                    htmlFor="new-order-address"
-                    className="text-sm font-medium"
-                  >
-                    收件地址
-                  </label>
+                </FormField>
+                <FormField className="md:col-span-2" label="收件地址">
                   <Input
                     id="new-order-address"
                     {...register("domesticDeliveryAddress")}
                     placeholder="地址"
                     aria-label="地址"
                   />
-                </div>
+                </FormField>
               </div>
             </section>
 
@@ -477,13 +401,11 @@ export default function CreateOrderDialog({
                 金額資訊
               </p>
               <div className="grid min-w-0 gap-3 md:grid-cols-3">
-                <div className="space-y-1">
-                  <label
-                    htmlFor="new-order-cost"
-                    className="text-sm font-medium"
-                  >
-                    成本
-                  </label>
+                <FormField
+                  label="成本"
+                  error={errors.cost?.message}
+                  errorId="new-order-cost-error"
+                >
                   <Input
                     id="new-order-cost"
                     type="number"
@@ -504,23 +426,12 @@ export default function CreateOrderDialog({
                     placeholder="成本"
                     aria-label="成本"
                   />
-                  {errors.cost && (
-                    <p
-                      id="new-order-cost-error"
-                      className="text-sm text-destructive"
-                      role="alert"
-                    >
-                      {errors.cost.message}
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-1">
-                  <label
-                    htmlFor="new-order-price"
-                    className="text-sm font-medium"
-                  >
-                    售價
-                  </label>
+                </FormField>
+                <FormField
+                  label="售價"
+                  error={errors.price?.message}
+                  errorId="new-order-price-error"
+                >
                   <Input
                     id="new-order-price"
                     type="number"
@@ -541,23 +452,8 @@ export default function CreateOrderDialog({
                     placeholder="售價"
                     aria-label="售價"
                   />
-                  {errors.price && (
-                    <p
-                      id="new-order-price-error"
-                      className="text-sm text-destructive"
-                      role="alert"
-                    >
-                      {errors.price.message}
-                    </p>
-                  )}
-                </div>
-                <div className="space-y-1">
-                  <label
-                    htmlFor="new-order-domestic-shipping-fee"
-                    className="text-sm font-medium"
-                  >
-                    運費
-                  </label>
+                </FormField>
+                <FormField label="運費">
                   <Input
                     id="new-order-domestic-shipping-fee"
                     type="number"
@@ -565,7 +461,7 @@ export default function CreateOrderDialog({
                     placeholder="運費"
                     aria-label="運費"
                   />
-                </div>
+                </FormField>
               </div>
             </section>
 
@@ -574,8 +470,11 @@ export default function CreateOrderDialog({
                 訂單狀態
               </p>
               <div className="grid min-w-0 gap-3 md:grid-cols-2">
-                <div className="min-w-0 space-y-1">
-                  <label className="text-sm font-medium">收款狀態</label>
+                <FormField
+                  className="min-w-0"
+                  label="收款狀態"
+                  error={errors.paymentStatus?.message}
+                >
                   <Controller
                     control={control}
                     name="paymentStatus"
@@ -608,14 +507,12 @@ export default function CreateOrderDialog({
                       </Select>
                     )}
                   />
-                  {errors.paymentStatus && (
-                    <p className="text-sm text-destructive" role="alert">
-                      {errors.paymentStatus.message}
-                    </p>
-                  )}
-                </div>
-                <div className="min-w-0 space-y-1">
-                  <label className="text-sm font-medium">商品狀態</label>
+                </FormField>
+                <FormField
+                  className="min-w-0"
+                  label="商品狀態"
+                  error={errors.productStatus?.message}
+                >
                   <Controller
                     control={control}
                     name="productStatus"
@@ -642,12 +539,7 @@ export default function CreateOrderDialog({
                       </Select>
                     )}
                   />
-                  {errors.productStatus && (
-                    <p className="text-sm text-destructive" role="alert">
-                      {errors.productStatus.message}
-                    </p>
-                  )}
-                </div>
+                </FormField>
               </div>
             </section>
           </div>

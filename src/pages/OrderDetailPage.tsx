@@ -1,9 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Controller, useForm } from "react-hook-form";
 import { XIcon } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 import Button from "@/components/ui/button";
+import { FormField } from "@/components/FormField";
 import {
   fetchOrderById,
   orderRecordToDetailForm,
@@ -220,7 +221,7 @@ function OrderDetailPage() {
                 訂單資訊
               </p>
             </div>
-            <Field label="品項" requiredMark error={errors.item?.message}>
+            <FormField label="品項" requiredMark error={errors.item?.message}>
               <input
                 {...register("item", {
                   required: REQUIRED_MSG,
@@ -228,9 +229,9 @@ function OrderDetailPage() {
                 })}
                 className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
               />
-            </Field>
+            </FormField>
 
-            <Field label="數量" requiredMark error={errors.quantity?.message}>
+            <FormField label="數量" requiredMark error={errors.quantity?.message}>
               <input
                 type="number"
                 min={1}
@@ -244,9 +245,9 @@ function OrderDetailPage() {
                 })}
                 className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
               />
-            </Field>
+            </FormField>
 
-            <Field
+            <FormField
               label="購買日期"
               requiredMark
               error={errors.purchaseDate?.message}
@@ -256,9 +257,9 @@ function OrderDetailPage() {
                 {...register("purchaseDate", { required: REQUIRED_MSG })}
                 className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
               />
-            </Field>
+            </FormField>
 
-            <Field label="購買人" requiredMark error={errors.buyer?.message}>
+            <FormField label="購買人" requiredMark error={errors.buyer?.message}>
               <input
                 {...register("buyer", {
                   required: REQUIRED_MSG,
@@ -266,9 +267,9 @@ function OrderDetailPage() {
                 })}
                 className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
               />
-            </Field>
+            </FormField>
 
-            <Field label="付款人" error={errors.payer?.message}>
+            <FormField label="付款人" error={errors.payer?.message}>
               <Controller
                 control={control}
                 name="payer"
@@ -292,9 +293,9 @@ function OrderDetailPage() {
                   </Select>
                 )}
               />
-            </Field>
+            </FormField>
 
-            <Field label="包裹編號" error={errors.packageNumber?.message}>
+            <FormField label="包裹編號" error={errors.packageNumber?.message}>
               <Controller
                 control={control}
                 name="packageNumber"
@@ -322,7 +323,7 @@ function OrderDetailPage() {
                   </Select>
                 )}
               />
-            </Field>
+            </FormField>
 
             <label className="space-y-1 md:col-span-2">
               <span className="block text-sm font-medium">備註</span>
@@ -339,19 +340,19 @@ function OrderDetailPage() {
               </p>
             </div>
 
-            <Field label="收件人">
+            <FormField label="收件人">
               <input
                 {...register("recipientName")}
                 className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
               />
-            </Field>
+            </FormField>
 
-            <Field label="電話">
+            <FormField label="電話">
               <input
                 {...register("phone")}
                 className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
               />
-            </Field>
+            </FormField>
 
             <label className="space-y-1 md:col-span-2">
               <span className="block text-sm font-medium">地址</span>
@@ -368,7 +369,7 @@ function OrderDetailPage() {
             </div>
 
             <div className="md:col-span-2 grid gap-4 md:grid-cols-4">
-              <Field label="售價" error={errors.price?.message}>
+              <FormField label="售價" error={errors.price?.message}>
                 <input
                   type="number"
                   {...register("price", {
@@ -382,8 +383,8 @@ function OrderDetailPage() {
                   })}
                   className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
                 />
-              </Field>
-              <Field label="成本" error={errors.cost?.message}>
+              </FormField>
+              <FormField label="成本" error={errors.cost?.message}>
                 <input
                   type="number"
                   {...register("cost", {
@@ -397,16 +398,16 @@ function OrderDetailPage() {
                   })}
                   className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
                 />
-              </Field>
-              <Field label="收益">
+              </FormField>
+              <FormField label="收益">
                 <input
                   type="number"
                   {...register("revenue", { valueAsNumber: true })}
                   readOnly
                   className="w-full rounded-md border border-input bg-muted px-3 py-2 text-sm"
                 />
-              </Field>
-              <Field label="運費" error={errors.domesticShippingFee?.message}>
+              </FormField>
+              <FormField label="運費" error={errors.domesticShippingFee?.message}>
                 <input
                   type="number"
                   {...register("domesticShippingFee", {
@@ -416,7 +417,7 @@ function OrderDetailPage() {
                   })}
                   className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
                 />
-              </Field>
+              </FormField>
             </div>
 
             <div className="md:col-span-2 mt-2">
@@ -425,7 +426,7 @@ function OrderDetailPage() {
               </p>
             </div>
 
-            <Field label="收款狀態" error={errors.paymentStatus?.message}>
+            <FormField label="收款狀態" error={errors.paymentStatus?.message}>
               <Controller
                 control={control}
                 name="paymentStatus"
@@ -461,9 +462,9 @@ function OrderDetailPage() {
                   </Select>
                 )}
               />
-            </Field>
+            </FormField>
 
-            <Field label="商品狀態" error={errors.productStatus?.message}>
+            <FormField label="商品狀態" error={errors.productStatus?.message}>
               <Controller
                 control={control}
                 name="productStatus"
@@ -503,7 +504,7 @@ function OrderDetailPage() {
                   </Select>
                 )}
               />
-            </Field>
+            </FormField>
             {saveError && (
               <div
                 className="md:col-span-2 mt-2 flex items-start justify-between gap-2 border-t pt-4 text-sm text-destructive"
@@ -534,37 +535,6 @@ function OrderDetailPage() {
         </fieldset>
       </form>
     </main>
-  );
-}
-
-function Field({
-  label,
-  children,
-  requiredMark,
-  error,
-}: {
-  label: string;
-  children: ReactNode;
-  requiredMark?: boolean;
-  error?: string;
-}) {
-  return (
-    <label className="space-y-1">
-      <span className="block text-sm font-medium">
-        {label}
-        {requiredMark ? (
-          <span className="text-destructive" aria-hidden="true">
-            *
-          </span>
-        ) : null}
-      </span>
-      {children}
-      {error ? (
-        <p className="text-sm text-destructive" role="alert">
-          {error}
-        </p>
-      ) : null}
-    </label>
   );
 }
 
