@@ -128,6 +128,7 @@ function OrderDetailPage() {
     reset(nextValues);
     queryClient.invalidateQueries({ queryKey: ordersKeys.lists() });
     queryClient.invalidateQueries({ queryKey: ordersKeys.totals() });
+    queryClient.invalidateQueries({ queryKey: packagesKeys.pageRows() });
     if (window.history.length > 1) {
       navigate(-1);
     } else {
