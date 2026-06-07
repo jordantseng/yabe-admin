@@ -8,6 +8,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { formatOrderPayerDisplay } from "@/lib/order-payer-display";
+import { ORDER_PAYERS } from "@/types/database";
 import { REQUIRED_MSG, type OrderDetailFieldLock } from "../constants";
 
 type OrderDetailOrderInfoSectionProps = {
@@ -97,11 +99,16 @@ export default function OrderDetailOrderInfoSection({
               }}
             >
               <SelectTrigger className="w-full" aria-label="付款人">
-                <SelectValue placeholder="付款人" />
+                <SelectValue placeholder="付款人">
+                  {formatOrderPayerDisplay(field.value)}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="虹">虹</SelectItem>
-                <SelectItem value="藍">藍</SelectItem>
+                {ORDER_PAYERS.map((payer) => (
+                  <SelectItem key={payer} value={payer}>
+                    {formatOrderPayerDisplay(payer)}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           )}

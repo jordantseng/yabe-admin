@@ -70,11 +70,13 @@ import {
   type OrderWithPackageNumber,
   type PackagePageEmptyPackageStub,
 } from "@/lib/orders";
+import { formatOrderPayerDisplay } from "@/lib/order-payer-display";
 import type {
   OrderPayer,
   OrderPaymentStatus,
   OrderProductStatus,
 } from "@/types/database";
+import { ORDER_PAYERS } from "@/types/database";
 import { packagesKeys } from "@/lib/queryKeys";
 import { unwrapResultOrThrow } from "@/lib/result-utils";
 
@@ -1066,12 +1068,19 @@ function PackagePage() {
                   }}
                 >
                   <SelectTrigger aria-label="篩選付款人">
-                    <SelectValue placeholder="付款人" />
+                    <SelectValue placeholder="付款人">
+                      {draftFilterPayer === "全部"
+                        ? "全部付款人"
+                        : formatOrderPayerDisplay(draftFilterPayer)}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="全部">全部付款人</SelectItem>
-                    <SelectItem value="虹">虹</SelectItem>
-                    <SelectItem value="藍">藍</SelectItem>
+                    {ORDER_PAYERS.map((payer) => (
+                      <SelectItem key={payer} value={payer}>
+                        {formatOrderPayerDisplay(payer)}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -1191,7 +1200,7 @@ function PackagePage() {
             }}
             className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-3 py-1 text-xs"
           >
-            付款人: {listUrl.payer}
+            付款人: {formatOrderPayerDisplay(listUrl.payer)}
             <span aria-hidden="true">×</span>
           </button>
         )}
@@ -1523,7 +1532,7 @@ function PackagePage() {
                       >
                         {row.buyer}
                       </TableCell>
-                      <TableCell>{row.payer}</TableCell>
+                      <TableCell>{formatOrderPayerDisplay(row.payer)}</TableCell>
                       <TableCell
                         className="max-w-32 truncate"
                         title={row.recipientName}

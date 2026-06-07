@@ -23,6 +23,9 @@ import {
 } from "@/components/ui/select";
 import { createOrder } from "@/lib/orders";
 import { fetchPackageNumbersFromDb } from "@/lib/packages";
+import { formatOrderPayerDisplay } from "@/lib/order-payer-display";
+import type { OrderPayer } from "@/types/database";
+import { ORDER_PAYERS } from "@/types/database";
 import { ordersKeys, packagesKeys } from "@/lib/queryKeys";
 import { unwrapResultOrThrow } from "@/lib/result-utils";
 
@@ -37,7 +40,7 @@ type NewOrderDraft = {
   quantity: string;
   buyer: string;
   domesticDeliveryAddress: string;
-  payer: "虹" | "藍";
+  payer: OrderPayer;
   cost: string;
   price: string;
   domesticShippingFee: string;
@@ -306,11 +309,16 @@ export default function CreateOrderDialog({
                           className="w-full min-w-0"
                           aria-label="付款人"
                         >
-                          <SelectValue placeholder="付款人" />
+                          <SelectValue placeholder="付款人">
+                            {formatOrderPayerDisplay(field.value)}
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="虹">虹</SelectItem>
-                          <SelectItem value="藍">藍</SelectItem>
+                          {ORDER_PAYERS.map((payer) => (
+                            <SelectItem key={payer} value={payer}>
+                              {formatOrderPayerDisplay(payer)}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     )}

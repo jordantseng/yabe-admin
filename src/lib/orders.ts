@@ -2,6 +2,7 @@ import { err, ok, type Result } from "neverthrow";
 import { supabase } from "@/lib/supabase";
 import type { ServiceError } from "@/lib/service-error";
 import type { OrderRow as OrderRecord } from "@/types/database";
+import { isOrderPayer } from "@/types/database";
 
 /** Order row from `select('*, packages(number)')`. */
 export type OrderWithPackageNumber = OrderRecord & {
@@ -301,7 +302,7 @@ export type FetchOrdersForPackagePageOptions = {
   /** `全部` | numeric (`1`, `2`) | legacy `package_number`（僅限已指派 `package_id`） */
   packageFilter?: string;
   productStatus?: string;
-  /** `全部` | `虹` | `藍` */
+  /** `全部` | `虹` | `藍` | `藍男友` */
   payer?: string;
   page?: number;
   /** 每頁幾個包裹分組（預設 2；依建立時間新→舊分頁） */
@@ -420,7 +421,7 @@ export async function fetchOrdersForPackagePage(
     query = query.eq("product_status", prod);
   }
   const payerFilter = options.payer?.trim() ?? "全部";
-  if (payerFilter === "虹" || payerFilter === "藍") {
+  if (isOrderPayer(payerFilter)) {
     query = query.eq("payer", payerFilter);
   }
 

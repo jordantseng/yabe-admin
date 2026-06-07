@@ -53,6 +53,8 @@ import {
 import { fetchPackageNumbersFromDb } from "@/lib/packages";
 import { unwrapResultOrThrow } from "@/lib/result-utils";
 import { ordersKeys, packagesKeys } from "@/lib/queryKeys";
+import { formatOrderPayerDisplay } from "@/lib/order-payer-display";
+import { isOrderPayer, ORDER_PAYERS } from "@/types/database";
 
 const ORDERS_PAGE_SIZE = 12;
 
@@ -806,17 +808,22 @@ function OrdersPage() {
                         value={order.payer}
                         onValueChange={(value) => {
                           if (isLocked) return;
-                          if (value === "虹" || value === "藍") {
+                          if (value && isOrderPayer(value)) {
                             void persistListPatch(order.id, { payer: value });
                           }
                         }}
                       >
-                        <SelectTrigger className="h-8 w-24" aria-label="付款人">
-                          <SelectValue placeholder="付款人" />
+                        <SelectTrigger className="h-8 w-28" aria-label="付款人">
+                          <SelectValue placeholder="付款人">
+                            {formatOrderPayerDisplay(order.payer)}
+                          </SelectValue>
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="虹">虹</SelectItem>
-                          <SelectItem value="藍">藍</SelectItem>
+                          {ORDER_PAYERS.map((payer) => (
+                            <SelectItem key={payer} value={payer}>
+                              {formatOrderPayerDisplay(payer)}
+                            </SelectItem>
+                          ))}
                         </SelectContent>
                       </Select>
                     </TableCell>

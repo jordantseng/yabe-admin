@@ -31,7 +31,13 @@ export type PackageUpdate = Partial<
   Omit<PackageRow, "id" | "number" | "created_at" | "updated_at">
 >;
 
-export type OrderPayer = "虹" | "藍";
+export type OrderPayer = "虹" | "藍" | "藍男友";
+
+export const ORDER_PAYERS = ["虹", "藍", "藍男友"] as const satisfies readonly OrderPayer[];
+
+export function isOrderPayer(value: string): value is OrderPayer {
+  return (ORDER_PAYERS as readonly string[]).includes(value);
+}
 
 export type OrderPaymentStatus = "未收款" | "已收款" | "已入帳";
 
