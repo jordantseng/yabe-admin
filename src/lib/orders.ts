@@ -328,9 +328,104 @@ type PkgListRow = {
   created_at: string;
 };
 
+function comparePackageGroupLabels(a: string, b: string): number {
+  if (a === "未指定" && b !== "未指定") return 1;
+  if (b === "未指定" && a !== "未指定") return -1;
+  const na = Number.parseInt(a, 10);
+  const nb = Number.parseInt(b, 10);
+  const aNum = Number.isFinite(na) && String(na) === a;
+  const bNum = Number.isFinite(nb) && String(nb) === b;
+  if (aNum && bNum) return nb - na;
+  if (aNum && !bNum) return -1;
+  if (!aNum && bNum) return 1;
+  return a.localeCompare(b, "zh-Hant");
+}
+
+function packagePageHasOrderLevelFilters(
+  options: FetchOrdersForPackagePageOptions,
+): boolean {
+  const itemSearch = options.itemSearch?.trim() ?? "";
+  const prod = options.productStatus?.trim();
+  const payer = options.payer?.trim() ?? "全部";
+  return (
+    itemSearch.length > 0 ||
+    (!!prod && prod !== "全部") ||
+    isOrderPayer(payer)
+  );
+}
+
+function buildPackagePageOrParts(
+  scopePackages: PkgListRow[],
+  pkgFilter: string,
+  includeUnassigned: boolean,
+): string[] {
+  const orParts: string[] = [];
+  if (scopePackages.length > 0) {
+    const ids = scopePackages.map((p) => p.id).join(",");
+    const nums = scopePackages
+      .map((p) => postgrestFilterQuoted(String(p.number)))
+      .join(",");
+    orParts.push(`package_id.in.(${ids})`);
+    orParts.push(`package_number.in.(${nums})`);
+  }
+  if (includeUnassigned && pkgFilter === "全部") {
+    orParts.push(
+      `and(package_id.is.null,package_number.eq.${postgrestFilterQuoted("未指定")})`,
+    );
+  }
+  return orParts;
+}
+
+function scopePackagePageOrders(
+  rows: OrderWithPackageNumber[],
+  scopePackages: PkgListRow[],
+  packageNumbers: Set<string>,
+  pkgFilter: string,
+  includeUnassigned: boolean,
+): OrderWithPackageNumber[] {
+  const scopeNumSet = new Set(scopePackages.map((p) => String(p.number)));
+  const scopeIdSet = new Set(scopePackages.map((p) => p.id));
+
+  return rows.filter((row) => {
+    const label = packageNumberLabelFromOrderRow(row);
+    if (label === "未指定") {
+      return includeUnassigned && pkgFilter === "全部";
+    }
+    const byFk = row.package_id != null && scopeIdSet.has(row.package_id);
+    const byLegacy =
+      !!row.package_number &&
+      row.package_number !== "未指定" &&
+      scopeNumSet.has(row.package_number) &&
+      packageNumbers.has(row.package_number);
+    return byFk || byLegacy;
+  });
+}
+
+function sortPackagePageOrders(
+  rows: OrderWithPackageNumber[],
+): OrderWithPackageNumber[] {
+  return [...rows].sort((a, b) => {
+    const buyerCmp = a.buyer.localeCompare(b.buyer, "zh-Hant");
+    if (buyerCmp !== 0) return buyerCmp;
+    const aDate = Date.parse(a.purchase_date);
+    const bDate = Date.parse(b.purchase_date);
+    return bDate - aDate;
+  });
+}
+
+function pkgListRowToEmptyStub(p: PkgListRow): PackagePageEmptyPackageStub {
+  return {
+    number: String(p.number),
+    notes: p.notes?.trim() ?? "",
+    internationalShippingFee: p.international_shipping_fee ?? 0,
+    isSettled: p.is_settled === true,
+  };
+}
+
 /**
  * 包裹頁：以 **包裹** 分頁。排序為 **新→舊**（`packages.created_at` 遞減，同時間則 `number` 遞減）。
  * 只載入本頁包裹底下訂單；第 1 頁且篩選「全部」時併入 `未指定` 訂單。
+ * 有品項／商品狀態／付款人篩選時，改以 **有符合訂單的包裹分組** 分頁（避免篩「已出貨」卻翻很多空包裹頁）。
  * `count` = 用於分頁的包裹總數；`emptyPackageStubs` = 本頁包裹在篩選後無訂單時仍顯示空分組。
  */
 export async function fetchOrdersForPackagePage(
@@ -349,6 +444,7 @@ export async function fetchOrdersForPackagePage(
   const pkgFilter = raw === "未指定" ? "全部" : raw;
   const page = Math.max(1, options.page ?? 1);
   const packagesPerPage = Math.min(50, Math.max(1, options.packagesPerPage ?? 2));
+  const hasOrderFilters = packagePageHasOrderLevelFilters(options);
 
   const { data: pkgs, error: pkgsError } = await supabase
     .from("packages")
@@ -367,50 +463,49 @@ export async function fetchOrdersForPackagePage(
   });
   const packageNumbers = new Set(pkgRows.map((p) => String(p.number)));
 
-  let pagePackages: PkgListRow[];
+  let scopePackages: PkgListRow[];
   let packageCountForPagination: number;
 
   if (pkgFilter === "全部") {
+    scopePackages = pkgRows;
     packageCountForPagination = pkgRows.length;
-    const fromPkg = (page - 1) * packagesPerPage;
-    pagePackages = pkgRows.slice(fromPkg, fromPkg + packagesPerPage);
   } else {
     const asInt = Number.parseInt(pkgFilter, 10);
-    const matching = pkgRows.filter((p) => {
+    scopePackages = pkgRows.filter((p) => {
       if (Number.isFinite(asInt) && String(asInt) === pkgFilter) {
         return p.number === asInt;
       }
       return String(p.number) === pkgFilter;
     });
-    packageCountForPagination = matching.length;
-    pagePackages = matching;
+    packageCountForPagination = scopePackages.length;
   }
 
-  const orParts: string[] = [];
-  if (pagePackages.length > 0) {
-    const ids = pagePackages.map((p) => p.id).join(",");
-    const nums = pagePackages
-      .map((p) => postgrestFilterQuoted(String(p.number)))
-      .join(",");
-    orParts.push(`package_id.in.(${ids})`);
-    orParts.push(`package_number.in.(${nums})`);
+  let queryPackages: PkgListRow[];
+  let includeUnassigned: boolean;
+
+  if (hasOrderFilters) {
+    queryPackages = scopePackages;
+    includeUnassigned = pkgFilter === "全部";
+  } else if (pkgFilter === "全部") {
+    const fromPkg = (page - 1) * packagesPerPage;
+    queryPackages = pkgRows.slice(fromPkg, fromPkg + packagesPerPage);
+    includeUnassigned = page === 1;
+  } else {
+    queryPackages = scopePackages;
+    includeUnassigned = false;
   }
-  if (page === 1 && pkgFilter === "全部") {
-    orParts.push(
-      `and(package_id.is.null,package_number.eq.${postgrestFilterQuoted("未指定")})`,
-    );
-  }
+
+  const orParts = buildPackagePageOrParts(
+    queryPackages,
+    pkgFilter,
+    includeUnassigned,
+  );
 
   if (orParts.length === 0) {
-    const emptyStubs: PackagePageEmptyPackageStub[] = pagePackages.map((p) => ({
-      number: String(p.number),
-      notes: p.notes?.trim() ?? "",
-      internationalShippingFee: p.international_shipping_fee ?? 0,
-      isSettled: p.is_settled === true,
-    }));
+    const emptyStubs = queryPackages.map(pkgListRowToEmptyStub);
     return ok({
       data: [],
-      count: packageCountForPagination,
+      count: hasOrderFilters ? 0 : packageCountForPagination,
       emptyPackageStubs: emptyStubs,
     });
   }
@@ -439,30 +534,64 @@ export async function fetchOrdersForPackagePage(
 
   if (error) return err({ message: error.message });
 
-  const pageNumSet = new Set(pagePackages.map((p) => String(p.number)));
-  const pageIdSet = new Set(pagePackages.map((p) => p.id));
+  const scoped = scopePackagePageOrders(
+    (data as OrderWithPackageNumber[] | null) ?? [],
+    queryPackages,
+    packageNumbers,
+    pkgFilter,
+    includeUnassigned,
+  );
 
-  const scoped = ((data as OrderWithPackageNumber[] | null) ?? []).filter((row) => {
-    const label = packageNumberLabelFromOrderRow(row);
-    if (label === "未指定") {
-      return page === 1 && pkgFilter === "全部";
+  if (hasOrderFilters) {
+    const byLabel = new Map<string, OrderWithPackageNumber[]>();
+    for (const row of scoped) {
+      const label = packageNumberLabelFromOrderRow(row);
+      const bucket = byLabel.get(label);
+      if (bucket) {
+        bucket.push(row);
+      } else {
+        byLabel.set(label, [row]);
+      }
     }
-    const byFk = row.package_id != null && pageIdSet.has(row.package_id);
-    const byLegacy =
-      !!row.package_number &&
-      row.package_number !== "未指定" &&
-      pageNumSet.has(row.package_number) &&
-      packageNumbers.has(row.package_number);
-    return byFk || byLegacy;
-  });
 
-  const sorted = [...scoped].sort((a, b) => {
-    const buyerCmp = a.buyer.localeCompare(b.buyer, "zh-Hant");
-    if (buyerCmp !== 0) return buyerCmp;
-    const aDate = Date.parse(a.purchase_date);
-    const bDate = Date.parse(b.purchase_date);
-    return bDate - aDate;
-  });
+    let groupLabels = Array.from(byLabel.keys()).sort(comparePackageGroupLabels);
+    if (
+      pkgFilter !== "全部" &&
+      groupLabels.length === 0 &&
+      scopePackages.length > 0
+    ) {
+      groupLabels = scopePackages.map((p) => String(p.number));
+    }
+
+    packageCountForPagination = groupLabels.length;
+    const from = (page - 1) * packagesPerPage;
+    const pageLabelList = groupLabels.slice(from, from + packagesPerPage);
+
+    const pageRows: OrderWithPackageNumber[] = [];
+    for (const label of pageLabelList) {
+      const rows = byLabel.get(label);
+      if (rows) {
+        pageRows.push(...sortPackagePageOrders(rows));
+      }
+    }
+
+    const emptyPackageStubs: PackagePageEmptyPackageStub[] = [];
+    for (const label of pageLabelList) {
+      if (byLabel.has(label)) continue;
+      const pkg = scopePackages.find((p) => String(p.number) === label);
+      if (pkg) {
+        emptyPackageStubs.push(pkgListRowToEmptyStub(pkg));
+      }
+    }
+
+    return ok({
+      data: pageRows,
+      count: packageCountForPagination,
+      emptyPackageStubs,
+    });
+  }
+
+  const sorted = sortPackagePageOrders(scoped);
 
   const packageNumbersWithOrders = new Set<string>();
   for (const row of sorted) {
@@ -470,15 +599,10 @@ export async function fetchOrdersForPackagePage(
   }
 
   const emptyPackageStubs: PackagePageEmptyPackageStub[] = [];
-  for (const p of pagePackages) {
+  for (const p of queryPackages) {
     const label = String(p.number);
     if (!packageNumbersWithOrders.has(label)) {
-      emptyPackageStubs.push({
-        number: label,
-        notes: p.notes?.trim() ?? "",
-        internationalShippingFee: p.international_shipping_fee ?? 0,
-        isSettled: p.is_settled === true,
-      });
+      emptyPackageStubs.push(pkgListRowToEmptyStub(p));
     }
   }
 

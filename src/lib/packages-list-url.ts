@@ -1,4 +1,8 @@
-import { createParser, parseAsString } from "nuqs";
+import { createParser, parseAsString, parseAsStringLiteral } from "nuqs";
+import {
+  ORDERS_PRODUCT_OPTIONS,
+  type OrdersListUrlState,
+} from "./orders-list-url";
 
 const parseAsPackageFilter = createParser({
   parse(value) {
@@ -23,7 +27,7 @@ const parseAsPackagesPage = createParser({
 export const packagesListSearchParams = {
   q: parseAsString.withDefault(""),
   pkg: parseAsPackageFilter,
-  product: parseAsString.withDefault("全部"),
+  product: parseAsStringLiteral(ORDERS_PRODUCT_OPTIONS).withDefault("全部"),
   payer: parseAsString.withDefault("全部"),
   page: parseAsPackagesPage,
 };
@@ -31,7 +35,7 @@ export const packagesListSearchParams = {
 export type PackagesListUrlState = {
   q: string;
   pkg: string;
-  product: string;
+  product: OrdersListUrlState["product"];
   payer: string;
   page: number;
 };

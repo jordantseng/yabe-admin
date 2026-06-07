@@ -61,6 +61,7 @@ import {
   packagesListSearchParams,
   type PackagesListUrlState,
 } from "@/lib/packages-list-url";
+import { ORDERS_PRODUCT_OPTIONS } from "@/lib/orders-list-url";
 import {
   fetchOrdersForPackagePage,
   packageNumberLabelFromOrderRow,
@@ -80,6 +81,8 @@ import type {
 import { ORDER_PAYERS } from "@/types/database";
 import { packagesKeys } from "@/lib/queryKeys";
 import { unwrapResultOrThrow } from "@/lib/result-utils";
+
+type PackageProductFilter = (typeof ORDERS_PRODUCT_OPTIONS)[number];
 
 /** 每頁顯示 1 個包裹（排序新→舊） */
 const PACKAGE_GROUPS_PER_PAGE = 1;
@@ -367,7 +370,7 @@ function PackagePage() {
   const [draftFilterPackageNumber, setDraftFilterPackageNumber] =
     useState<string>("全部");
   const [draftFilterProductStatus, setDraftFilterProductStatus] =
-    useState<string>("全部");
+    useState<PackageProductFilter>("全部");
   const [draftFilterPayer, setDraftFilterPayer] = useState<string>("全部");
   const [rowFieldError, setRowFieldError] = useState<string | null>(null);
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
@@ -538,7 +541,7 @@ function PackagePage() {
     patch: Partial<{
       q: string;
       pkg: string;
-      product: string;
+      product: PackageProductFilter;
       payer: string;
       page: number;
     }>
@@ -1044,8 +1047,11 @@ function PackagePage() {
                 <Select
                   value={draftFilterProductStatus}
                   onValueChange={(value) => {
-                    if (value) {
-                      setDraftFilterProductStatus(value);
+                    if (
+                      value &&
+                      (ORDERS_PRODUCT_OPTIONS as readonly string[]).includes(value)
+                    ) {
+                      setDraftFilterProductStatus(value as PackageProductFilter);
                     }
                   }}
                 >
@@ -1379,6 +1385,8 @@ function PackagePage() {
                     ? "沒有符合品項搜尋的訂單。"
                     : listUrl.pkg !== "全部"
                     ? "此篩選條件下沒有訂單，或包裹編號不存在。"
+                    : listUrl.product !== "全部"
+                    ? "此商品狀態篩選下沒有訂單。"
                     : listUrl.payer !== "全部"
                     ? "此付款人篩選下沒有訂單。"
                     : "尚無已指派包裹的訂單。"}
