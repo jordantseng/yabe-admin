@@ -749,7 +749,7 @@ function OrdersPage() {
                     <Skeleton className="h-4 w-20" />
                   </TableCell>
                   <TableCell>
-                    <Skeleton className="h-8 w-24" />
+                    <Skeleton className="h-8 w-20" />
                   </TableCell>
                   <TableCell>
                     <Skeleton className="h-4 w-14" />
@@ -821,7 +821,7 @@ function OrdersPage() {
                           }
                         }}
                       >
-                        <SelectTrigger className="h-8 w-28" aria-label="付款人">
+                        <SelectTrigger className="h-8 w-20" aria-label="付款人">
                           <SelectValue placeholder="付款人">
                             {formatOrderPayerDisplay(order.payer)}
                           </SelectValue>
