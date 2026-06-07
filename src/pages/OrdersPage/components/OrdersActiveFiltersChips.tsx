@@ -14,7 +14,7 @@ export default function OrdersActiveFiltersChips({ listUrl, onPatch }: Props) {
           onClick={() => onPatch({ q: "", page: 1 })}
           className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-3 py-1 text-xs"
         >
-          品項: {listUrl.q}
+          搜尋: {listUrl.q}
           <span aria-hidden="true">×</span>
         </button>
       )}

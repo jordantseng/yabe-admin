@@ -166,6 +166,7 @@ export function orderRecordToDetailForm(row: OrderRecord): OrderDetailFormValues
 }
 
 export type FetchOrdersOptions = {
+  /** Partial match on item or buyer. */
   itemSearch?: string;
   paymentStatus?: string;
   productStatus?: string;
@@ -185,12 +186,18 @@ function postgrestFilterQuoted(value: string): string {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function applyOrderListFilters(query: any, options: FetchOrdersOptions) {
-  let q = query;
-  const trimmedItem = options.itemSearch?.trim() ?? "";
-  if (trimmedItem.length > 0) {
-    q = q.ilike("item", `%${escapeIlikePattern(trimmedItem)}%`);
+function applyItemOrBuyerSearch(query: any, search?: string) {
+  const trimmed = search?.trim() ?? "";
+  if (trimmed.length === 0) {
+    return query;
   }
+  const pattern = escapeIlikePattern(trimmed);
+  return query.or(`item.ilike.%${pattern}%,buyer.ilike.%${pattern}%`);
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applyOrderListFilters(query: any, options: FetchOrdersOptions) {
+  let q = applyItemOrBuyerSearch(query, options.itemSearch);
   const pay = options.paymentStatus?.trim();
   if (pay && pay !== "全部") q = q.eq("payment_status", pay);
   const prod = options.productStatus?.trim();
@@ -519,7 +526,7 @@ export async function fetchOrdersForPackagePage(
 
   const itemSearch = options.itemSearch?.trim() ?? "";
   if (itemSearch.length > 0) {
-    query = query.ilike("item", `%${escapeIlikePattern(itemSearch)}%`);
+    query = applyItemOrBuyerSearch(query, itemSearch);
   }
   const prod = options.productStatus?.trim();
   if (prod && prod !== "全部") {

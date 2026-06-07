@@ -992,8 +992,8 @@ function PackagePage() {
       <div className="mb-2 flex items-center justify-between gap-2">
         <SearchBar
           defaultValue={listUrl.q}
-          placeholder="搜尋品項"
-          ariaLabel="搜尋品項"
+          placeholder="搜尋品項或購買人"
+          ariaLabel="搜尋品項或購買人"
           onSearch={(value) => applySearch(value)}
         />
 
@@ -1175,7 +1175,7 @@ function PackagePage() {
             }}
             className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-3 py-1 text-xs"
           >
-            品項: {listUrl.q}
+            搜尋: {listUrl.q}
             <span aria-hidden="true">×</span>
           </button>
         )}
@@ -1382,7 +1382,7 @@ function PackagePage() {
                   className="h-24 text-center text-sm text-muted-foreground"
                 >
                   {listUrl.q.trim() !== ""
-                    ? "沒有符合品項搜尋的訂單。"
+                    ? "沒有符合搜尋條件的訂單。"
                     : listUrl.pkg !== "全部"
                     ? "此篩選條件下沒有訂單，或包裹編號不存在。"
                     : listUrl.product !== "全部"

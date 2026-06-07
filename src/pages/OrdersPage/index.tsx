@@ -652,8 +652,8 @@ function OrdersPage() {
       <div className="mb-4 flex items-center justify-between gap-2">
         <SearchBar
           defaultValue={listUrl.q}
-          placeholder="搜尋品項"
-          ariaLabel="搜尋品項"
+          placeholder="搜尋品項或購買人"
+          ariaLabel="搜尋品項或購買人"
           onSearch={(value) => applySearch(value)}
         />
         <div className="flex items-center gap-2">
