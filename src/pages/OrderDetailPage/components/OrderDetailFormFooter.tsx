@@ -3,6 +3,8 @@ import { useFormContext } from "react-hook-form";
 import Button from "@/components/ui/button";
 import type { OrderDetailFormValues } from "@/lib/orders";
 
+import type { OrderDetailFieldLock } from "../constants";
+
 function hasOnlyShippedEditableChanges(
   dirtyFields: Partial<
     Record<keyof OrderDetailFormValues, boolean | Record<string, unknown>>
@@ -18,18 +20,15 @@ function hasOnlyShippedEditableChanges(
 type OrderDetailFormFooterProps = {
   saveError: string | null;
   onDismissSaveError: () => void;
-  formDisabled: boolean;
+  fieldLock: OrderDetailFieldLock;
   isSaving: boolean;
-  /** 與欄位鎖定一致；此區塊放在 fieldset 外，避免 disabled fieldset 連帶停用關閉錯誤按鈕 */
-  isPersistedShippedLocked: boolean;
 };
 
 export default function OrderDetailFormFooter({
   saveError,
   onDismissSaveError,
-  formDisabled,
+  fieldLock,
   isSaving,
-  isPersistedShippedLocked,
 }: OrderDetailFormFooterProps) {
   const {
     formState: { isDirty, dirtyFields },
@@ -62,9 +61,9 @@ export default function OrderDetailFormFooter({
           type="submit"
           disabled={
             !isDirty ||
-            formDisabled ||
+            fieldLock.formDisabled ||
             isSaving ||
-            (isPersistedShippedLocked && !canSaveWhenShippedLocked)
+            (fieldLock.isShippedLocked && !canSaveWhenShippedLocked)
           }
         >
           {isSaving ? "更新中…" : "更新"}

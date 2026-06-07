@@ -8,17 +8,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { REQUIRED_MSG } from "../constants";
+import { REQUIRED_MSG, type OrderDetailFieldLock } from "../constants";
 
 type OrderDetailOrderInfoSectionProps = {
-  formDisabled: boolean;
-  isPersistedShippedLocked: boolean;
+  fieldLock: OrderDetailFieldLock;
   packageNumberOptions: string[];
 };
 
 export default function OrderDetailOrderInfoSection({
-  formDisabled,
-  isPersistedShippedLocked,
+  fieldLock,
   packageNumberOptions,
 }: OrderDetailOrderInfoSectionProps) {
   const {
@@ -34,7 +32,7 @@ export default function OrderDetailOrderInfoSection({
       </div>
       <FormField label="品項" requiredMark error={errors.item?.message}>
         <input
-          disabled={formDisabled || isPersistedShippedLocked}
+          disabled={fieldLock.fieldsDisabled}
           {...register("item", {
             required: REQUIRED_MSG,
             validate: (v) => v.trim() !== "" || REQUIRED_MSG,
@@ -48,7 +46,7 @@ export default function OrderDetailOrderInfoSection({
           type="number"
           min={1}
           step={1}
-          disabled={formDisabled || isPersistedShippedLocked}
+          disabled={fieldLock.fieldsDisabled}
           {...register("quantity", {
             required: REQUIRED_MSG,
             valueAsNumber: true,
@@ -67,7 +65,7 @@ export default function OrderDetailOrderInfoSection({
       >
         <input
           type="date"
-          disabled={formDisabled || isPersistedShippedLocked}
+          disabled={fieldLock.fieldsDisabled}
           {...register("purchaseDate", { required: REQUIRED_MSG })}
           className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
         />
@@ -75,7 +73,7 @@ export default function OrderDetailOrderInfoSection({
 
       <FormField label="購買人" requiredMark error={errors.buyer?.message}>
         <input
-          disabled={formDisabled || isPersistedShippedLocked}
+          disabled={fieldLock.fieldsDisabled}
           {...register("buyer", {
             required: REQUIRED_MSG,
             validate: (v) => v.trim() !== "" || REQUIRED_MSG,
@@ -91,10 +89,10 @@ export default function OrderDetailOrderInfoSection({
           rules={{ required: REQUIRED_MSG }}
           render={({ field }) => (
             <Select
-              disabled={formDisabled || isPersistedShippedLocked}
+              disabled={fieldLock.fieldsDisabled}
               value={field.value}
               onValueChange={(value) => {
-                if (isPersistedShippedLocked) return;
+                if (fieldLock.isShippedLocked) return;
                 if (value) field.onChange(value);
               }}
             >
@@ -117,10 +115,10 @@ export default function OrderDetailOrderInfoSection({
           rules={{ required: REQUIRED_MSG }}
           render={({ field }) => (
             <Select
-              disabled={formDisabled || isPersistedShippedLocked}
+              disabled={fieldLock.fieldsDisabled}
               value={field.value}
               onValueChange={(value) => {
-                if (isPersistedShippedLocked) return;
+                if (fieldLock.isShippedLocked) return;
                 if (value) field.onChange(value);
               }}
             >
@@ -143,7 +141,7 @@ export default function OrderDetailOrderInfoSection({
       <label className="space-y-1 md:col-span-2">
         <span className="block text-sm font-medium">備註</span>
         <textarea
-          disabled={formDisabled || isPersistedShippedLocked}
+          disabled={fieldLock.fieldsDisabled}
           {...register("notes")}
           rows={4}
           className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"

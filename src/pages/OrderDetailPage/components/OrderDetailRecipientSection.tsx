@@ -1,18 +1,16 @@
 import { useFormContext } from "react-hook-form";
 import FormField from "@/components/FormField";
 import type { OrderDetailFormValues } from "@/lib/orders";
+import type { OrderDetailFieldLock } from "../constants";
 
 type OrderDetailRecipientSectionProps = {
-  formDisabled: boolean;
-  isPersistedShippedLocked: boolean;
+  fieldLock: OrderDetailFieldLock;
 };
 
 export default function OrderDetailRecipientSection({
-  formDisabled,
-  isPersistedShippedLocked,
+  fieldLock,
 }: OrderDetailRecipientSectionProps) {
   const { register } = useFormContext<OrderDetailFormValues>();
-  const fieldDisabled = formDisabled || isPersistedShippedLocked;
 
   return (
     <>
@@ -22,7 +20,7 @@ export default function OrderDetailRecipientSection({
 
       <FormField label="收件人">
         <input
-          disabled={fieldDisabled}
+          disabled={fieldLock.fieldsDisabled}
           {...register("recipientName")}
           className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
         />
@@ -30,7 +28,7 @@ export default function OrderDetailRecipientSection({
 
       <FormField label="電話">
         <input
-          disabled={fieldDisabled}
+          disabled={fieldLock.fieldsDisabled}
           {...register("phone")}
           className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
         />
@@ -39,7 +37,7 @@ export default function OrderDetailRecipientSection({
       <label className="space-y-1 md:col-span-2">
         <span className="block text-sm font-medium">地址</span>
         <input
-          disabled={fieldDisabled}
+          disabled={fieldLock.fieldsDisabled}
           {...register("domesticDeliveryAddress")}
           className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
         />

@@ -80,6 +80,21 @@ function purchaseDateFromRecord(value: string): string {
   return value.length >= 10 ? value.slice(0, 10) : value;
 }
 
+function normalizedOrderText(value: string | null | undefined): string {
+  return (value ?? "").trim();
+}
+
+function normalizedOrderNumber(value: string | number | null | undefined): number {
+  const n =
+    typeof value === "string" ? Number.parseFloat(value) : Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function normalizedOrderQuantity(value: string | number | null | undefined): number {
+  const n = typeof value === "string" ? Number.parseInt(value, 10) : Number(value);
+  return Number.isFinite(n) ? Math.max(1, Math.trunc(n)) : 1;
+}
+
 /** 收益 = 售價 − 成本 (matches DB generated column). */
 export function revenueFromCostPrice(
   cost: string | number,
@@ -579,20 +594,21 @@ export async function updateOrderFromDetailForm(
       });
     }
     const hasDisallowedFieldChanged =
-      existing.item !== values.item.trim() ||
-      (existing.notes ?? "") !== (values.notes.trim() || "") ||
+      normalizedOrderText(existing.item) !== normalizedOrderText(values.item) ||
+      normalizedOrderText(existing.notes) !== normalizedOrderText(values.notes) ||
       purchaseDateFromRecord(existing.purchase_date) !== purchaseDate ||
-      (existing.recipient_name ?? "") !== (values.recipientName.trim() || null) ||
-      (existing.recipient_phone ?? "") !== (values.phone.trim() || null) ||
-      Number(existing.quantity) !==
-        (Number.isFinite(values.quantity)
-          ? Math.max(1, Math.trunc(values.quantity))
-          : 1) ||
-      existing.buyer !== values.buyer.trim() ||
-      (existing.domestic_delivery_address ?? "") !==
-        values.domesticDeliveryAddress.trim() ||
-      Number(existing.price) !== safePrice ||
-      Number(existing.domestic_shipping_fee) !== safeDomesticShippingFee;
+      normalizedOrderText(existing.recipient_name) !==
+        normalizedOrderText(values.recipientName) ||
+      normalizedOrderText(existing.recipient_phone) !==
+        normalizedOrderText(values.phone) ||
+      normalizedOrderQuantity(existing.quantity) !==
+        normalizedOrderQuantity(values.quantity) ||
+      normalizedOrderText(existing.buyer) !== normalizedOrderText(values.buyer) ||
+      normalizedOrderText(existing.domestic_delivery_address) !==
+        normalizedOrderText(values.domesticDeliveryAddress) ||
+      normalizedOrderNumber(existing.price) !== safePrice ||
+      normalizedOrderNumber(existing.domestic_shipping_fee) !==
+        safeDomesticShippingFee;
     if (hasDisallowedFieldChanged) {
       return err({ message: "商品狀態已出貨後只能修改成本" });
     }

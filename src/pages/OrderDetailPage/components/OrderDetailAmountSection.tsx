@@ -1,22 +1,19 @@
 import { useFormContext } from "react-hook-form";
 import FormField from "@/components/FormField";
 import type { OrderDetailFormValues } from "@/lib/orders";
-import { REQUIRED_MSG } from "../constants";
+import { REQUIRED_MSG, type OrderDetailFieldLock } from "../constants";
 
 type OrderDetailAmountSectionProps = {
-  formDisabled: boolean;
-  isPersistedShippedLocked: boolean;
+  fieldLock: OrderDetailFieldLock;
 };
 
 export default function OrderDetailAmountSection({
-  formDisabled,
-  isPersistedShippedLocked,
+  fieldLock,
 }: OrderDetailAmountSectionProps) {
   const {
     register,
     formState: { errors },
   } = useFormContext<OrderDetailFormValues>();
-  const lockedFieldDisabled = formDisabled || isPersistedShippedLocked;
 
   return (
     <>
@@ -27,7 +24,7 @@ export default function OrderDetailAmountSection({
         <FormField label="售價" error={errors.price?.message}>
           <input
             type="number"
-            disabled={lockedFieldDisabled}
+            disabled={fieldLock.fieldsDisabled}
             {...register("price", {
               setValueAs: (v) => {
                 if (v === "" || v === null || v === undefined) {
@@ -43,7 +40,7 @@ export default function OrderDetailAmountSection({
         <FormField label="成本" error={errors.cost?.message}>
           <input
             type="number"
-            disabled={formDisabled}
+            disabled={fieldLock.formDisabled}
             {...register("cost", {
               setValueAs: (v) => {
                 if (v === "" || v === null || v === undefined) {
@@ -70,7 +67,7 @@ export default function OrderDetailAmountSection({
         >
           <input
             type="number"
-            disabled={lockedFieldDisabled}
+            disabled={fieldLock.fieldsDisabled}
             {...register("domesticShippingFee", {
               required: REQUIRED_MSG,
               valueAsNumber: true,

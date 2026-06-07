@@ -8,17 +8,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { REQUIRED_MSG, paymentStatusTextClass } from "../constants";
+import {
+  REQUIRED_MSG,
+  paymentStatusTextClass,
+  type OrderDetailFieldLock,
+} from "../constants";
 
 type OrderDetailStatusSectionProps = {
-  formDisabled: boolean;
-  isPersistedShippedLocked: boolean;
+  fieldLock: OrderDetailFieldLock;
   onValidationMessage: (message: string) => void;
 };
 
 export default function OrderDetailStatusSection({
-  formDisabled,
-  isPersistedShippedLocked,
+  fieldLock,
   onValidationMessage,
 }: OrderDetailStatusSectionProps) {
   const {
@@ -40,10 +42,10 @@ export default function OrderDetailStatusSection({
           rules={{ required: REQUIRED_MSG }}
           render={({ field }) => (
             <Select
-              disabled={formDisabled || isPersistedShippedLocked}
+              disabled={fieldLock.fieldsDisabled}
               value={field.value}
               onValueChange={(value) => {
-                if (isPersistedShippedLocked) return;
+                if (fieldLock.isShippedLocked) return;
                 if (value) field.onChange(value);
               }}
             >
@@ -76,10 +78,10 @@ export default function OrderDetailStatusSection({
           rules={{ required: REQUIRED_MSG }}
           render={({ field }) => (
             <Select
-              disabled={formDisabled || isPersistedShippedLocked}
+              disabled={fieldLock.fieldsDisabled}
               value={field.value}
               onValueChange={(value) => {
-                if (isPersistedShippedLocked) {
+                if (fieldLock.isShippedLocked) {
                   onValidationMessage("商品狀態已出貨後不可再修改");
                   return;
                 }

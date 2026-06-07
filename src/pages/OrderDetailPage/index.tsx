@@ -11,7 +11,7 @@ import {
 import { fetchPackageNumbersFromDb } from "@/lib/packages";
 import { unwrapResultOrThrow } from "@/lib/result-utils";
 import { ordersKeys, packagesKeys } from "@/lib/queryKeys";
-import { emptyOrderDetailForm } from "./constants";
+import { emptyOrderDetailForm, buildOrderDetailFieldLock } from "./constants";
 import OrderDetailAmountSection from "./components/OrderDetailAmountSection";
 import OrderDetailFormFooter from "./components/OrderDetailFormFooter";
 import OrderDetailHeader from "./components/OrderDetailHeader";
@@ -64,6 +64,10 @@ function OrderDetailPage() {
   const displayLoadError = orderIdMissing ? "缺少訂單編號" : loadError;
   const showFetchLoading = Boolean(orderId && isLoading);
   const formDisabled = orderIdMissing || showFetchLoading || !!loadError;
+  const fieldLock = buildOrderDetailFieldLock(
+    formDisabled,
+    isPersistedShippedLocked,
+  );
 
   useEffect(() => {
     if (!orderId) {
@@ -72,7 +76,7 @@ function OrderDetailPage() {
 
     let cancelled = false;
 
-    void (async () => {
+    (async () => {
       if (cancelled) {
         return;
       }
@@ -154,30 +158,21 @@ function OrderDetailPage() {
           <div className="grid gap-4 rounded-md border p-4 md:grid-cols-2">
             <fieldset disabled={formDisabled || isSaving} className="contents">
               <OrderDetailOrderInfoSection
-                formDisabled={formDisabled}
-                isPersistedShippedLocked={isPersistedShippedLocked}
+                fieldLock={fieldLock}
                 packageNumberOptions={packageNumberOptions}
               />
-              <OrderDetailRecipientSection
-                formDisabled={formDisabled}
-                isPersistedShippedLocked={isPersistedShippedLocked}
-              />
-              <OrderDetailAmountSection
-                formDisabled={formDisabled}
-                isPersistedShippedLocked={isPersistedShippedLocked}
-              />
+              <OrderDetailRecipientSection fieldLock={fieldLock} />
+              <OrderDetailAmountSection fieldLock={fieldLock} />
               <OrderDetailStatusSection
-                formDisabled={formDisabled}
-                isPersistedShippedLocked={isPersistedShippedLocked}
+                fieldLock={fieldLock}
                 onValidationMessage={setSaveError}
               />
             </fieldset>
             <OrderDetailFormFooter
               saveError={saveError}
               onDismissSaveError={() => setSaveError(null)}
-              formDisabled={formDisabled}
+              fieldLock={fieldLock}
               isSaving={isSaving}
-              isPersistedShippedLocked={isPersistedShippedLocked}
             />
           </div>
         </form>
