@@ -3,22 +3,31 @@ import FormField from "@/components/FormField";
 import type { OrderDetailFormValues } from "@/lib/orders";
 import { REQUIRED_MSG } from "../constants";
 
-export default function OrderDetailAmountSection() {
+type OrderDetailAmountSectionProps = {
+  formDisabled: boolean;
+  isPersistedShippedLocked: boolean;
+};
+
+export default function OrderDetailAmountSection({
+  formDisabled,
+  isPersistedShippedLocked,
+}: OrderDetailAmountSectionProps) {
   const {
     register,
     formState: { errors },
   } = useFormContext<OrderDetailFormValues>();
+  const lockedFieldDisabled = formDisabled || isPersistedShippedLocked;
 
   return (
     <>
       <div className="md:col-span-2 mt-2">
         <p className="text-xs font-semibold text-muted-foreground">金額資訊</p>
       </div>
-
       <div className="md:col-span-2 grid gap-4 md:grid-cols-4">
         <FormField label="售價" error={errors.price?.message}>
           <input
             type="number"
+            disabled={lockedFieldDisabled}
             {...register("price", {
               setValueAs: (v) => {
                 if (v === "" || v === null || v === undefined) {
@@ -34,6 +43,7 @@ export default function OrderDetailAmountSection() {
         <FormField label="成本" error={errors.cost?.message}>
           <input
             type="number"
+            disabled={formDisabled}
             {...register("cost", {
               setValueAs: (v) => {
                 if (v === "" || v === null || v === undefined) {
@@ -60,6 +70,7 @@ export default function OrderDetailAmountSection() {
         >
           <input
             type="number"
+            disabled={lockedFieldDisabled}
             {...register("domesticShippingFee", {
               required: REQUIRED_MSG,
               valueAsNumber: true,

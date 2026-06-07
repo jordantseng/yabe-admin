@@ -34,6 +34,7 @@ export default function OrderDetailOrderInfoSection({
       </div>
       <FormField label="品項" requiredMark error={errors.item?.message}>
         <input
+          disabled={formDisabled || isPersistedShippedLocked}
           {...register("item", {
             required: REQUIRED_MSG,
             validate: (v) => v.trim() !== "" || REQUIRED_MSG,
@@ -47,6 +48,7 @@ export default function OrderDetailOrderInfoSection({
           type="number"
           min={1}
           step={1}
+          disabled={formDisabled || isPersistedShippedLocked}
           {...register("quantity", {
             required: REQUIRED_MSG,
             valueAsNumber: true,
@@ -65,6 +67,7 @@ export default function OrderDetailOrderInfoSection({
       >
         <input
           type="date"
+          disabled={formDisabled || isPersistedShippedLocked}
           {...register("purchaseDate", { required: REQUIRED_MSG })}
           className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"
         />
@@ -72,6 +75,7 @@ export default function OrderDetailOrderInfoSection({
 
       <FormField label="購買人" requiredMark error={errors.buyer?.message}>
         <input
+          disabled={formDisabled || isPersistedShippedLocked}
           {...register("buyer", {
             required: REQUIRED_MSG,
             validate: (v) => v.trim() !== "" || REQUIRED_MSG,
@@ -139,6 +143,7 @@ export default function OrderDetailOrderInfoSection({
       <label className="space-y-1 md:col-span-2">
         <span className="block text-sm font-medium">備註</span>
         <textarea
+          disabled={formDisabled || isPersistedShippedLocked}
           {...register("notes")}
           rows={4}
           className="w-full rounded-md border border-input px-3 py-2 text-sm disabled:bg-muted"

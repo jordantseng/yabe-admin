@@ -547,10 +547,21 @@ export async function updateOrderFromDetailForm(
 ): Promise<Result<OrderRecord, ServiceError>> {
   const { data: existing, error: existingError } = await supabase
     .from("orders")
-    .select("product_status, payer, payment_status, package_number")
+    .select(
+      "product_status, payer, payment_status, package_number, item, notes, purchase_date, recipient_name, recipient_phone, quantity, buyer, domestic_delivery_address, cost, price, domestic_shipping_fee",
+    )
     .eq("id", orderId)
     .single();
   if (existingError) return err({ message: existingError.message });
+
+  const purchaseDate =
+    values.purchaseDate.trim().slice(0, 10) ||
+    new Date().toISOString().slice(0, 10);
+  const safeCost = Number.isFinite(values.cost) ? values.cost : 0;
+  const safePrice = Number.isFinite(values.price) ? values.price : 0;
+  const safeDomesticShippingFee = Number.isFinite(values.domesticShippingFee)
+    ? values.domesticShippingFee
+    : 0;
 
   if (existing?.product_status === "已出貨") {
     const nextPackageNumber = values.packageNumber.trim();
@@ -567,6 +578,24 @@ export async function updateOrderFromDetailForm(
         message: "商品狀態已出貨，不能修改付款人、收款狀態或包裹編號",
       });
     }
+    const hasDisallowedFieldChanged =
+      existing.item !== values.item.trim() ||
+      (existing.notes ?? "") !== (values.notes.trim() || "") ||
+      purchaseDateFromRecord(existing.purchase_date) !== purchaseDate ||
+      (existing.recipient_name ?? "") !== (values.recipientName.trim() || null) ||
+      (existing.recipient_phone ?? "") !== (values.phone.trim() || null) ||
+      Number(existing.quantity) !==
+        (Number.isFinite(values.quantity)
+          ? Math.max(1, Math.trunc(values.quantity))
+          : 1) ||
+      existing.buyer !== values.buyer.trim() ||
+      (existing.domestic_delivery_address ?? "") !==
+        values.domesticDeliveryAddress.trim() ||
+      Number(existing.price) !== safePrice ||
+      Number(existing.domestic_shipping_fee) !== safeDomesticShippingFee;
+    if (hasDisallowedFieldChanged) {
+      return err({ message: "商品狀態已出貨後只能修改成本" });
+    }
   }
 
   if (values.productStatus === "已出貨" && values.paymentStatus !== "已入帳") {
@@ -575,9 +604,6 @@ export async function updateOrderFromDetailForm(
     });
   }
 
-  const purchaseDate =
-    values.purchaseDate.trim().slice(0, 10) ||
-    new Date().toISOString().slice(0, 10);
   const packageNumber = values.packageNumber.trim();
   let packageId: string | null = null;
   if (packageNumber !== "未指定") {
@@ -595,12 +621,6 @@ export async function updateOrderFromDetailForm(
       packageId = pkgRow.id;
     }
   }
-
-  const safeCost = Number.isFinite(values.cost) ? values.cost : 0;
-  const safePrice = Number.isFinite(values.price) ? values.price : 0;
-  const safeDomesticShippingFee = Number.isFinite(values.domesticShippingFee)
-    ? values.domesticShippingFee
-    : 0;
 
   const { data, error } = await supabase
     .from("orders")

@@ -3,6 +3,18 @@ import { useFormContext } from "react-hook-form";
 import Button from "@/components/ui/button";
 import type { OrderDetailFormValues } from "@/lib/orders";
 
+function hasOnlyShippedEditableChanges(
+  dirtyFields: Partial<
+    Record<keyof OrderDetailFormValues, boolean | Record<string, unknown>>
+  >,
+): boolean {
+  const keys = Object.keys(dirtyFields) as (keyof OrderDetailFormValues)[];
+  if (keys.length === 0) {
+    return false;
+  }
+  return keys.every((key) => key === "cost" || key === "revenue");
+}
+
 type OrderDetailFormFooterProps = {
   saveError: string | null;
   onDismissSaveError: () => void;
@@ -20,8 +32,10 @@ export default function OrderDetailFormFooter({
   isPersistedShippedLocked,
 }: OrderDetailFormFooterProps) {
   const {
-    formState: { isDirty },
+    formState: { isDirty, dirtyFields },
   } = useFormContext<OrderDetailFormValues>();
+  const canSaveWhenShippedLocked =
+    isDirty && hasOnlyShippedEditableChanges(dirtyFields);
 
   return (
     <>
@@ -50,7 +64,7 @@ export default function OrderDetailFormFooter({
             !isDirty ||
             formDisabled ||
             isSaving ||
-            isPersistedShippedLocked
+            (isPersistedShippedLocked && !canSaveWhenShippedLocked)
           }
         >
           {isSaving ? "更新中…" : "更新"}

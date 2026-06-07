@@ -152,17 +152,20 @@ function OrderDetailPage() {
       <FormProvider {...methods}>
         <form onSubmit={handleSubmit(onSubmit)} className="mb-6 space-y-6">
           <div className="grid gap-4 rounded-md border p-4 md:grid-cols-2">
-            <fieldset
-              disabled={formDisabled || isSaving || isPersistedShippedLocked}
-              className="contents"
-            >
+            <fieldset disabled={formDisabled || isSaving} className="contents">
               <OrderDetailOrderInfoSection
                 formDisabled={formDisabled}
                 isPersistedShippedLocked={isPersistedShippedLocked}
                 packageNumberOptions={packageNumberOptions}
               />
-              <OrderDetailRecipientSection />
-              <OrderDetailAmountSection />
+              <OrderDetailRecipientSection
+                formDisabled={formDisabled}
+                isPersistedShippedLocked={isPersistedShippedLocked}
+              />
+              <OrderDetailAmountSection
+                formDisabled={formDisabled}
+                isPersistedShippedLocked={isPersistedShippedLocked}
+              />
               <OrderDetailStatusSection
                 formDisabled={formDisabled}
                 isPersistedShippedLocked={isPersistedShippedLocked}
