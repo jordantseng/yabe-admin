@@ -54,7 +54,12 @@ import { fetchPackageNumbersFromDb } from "@/lib/packages";
 import { unwrapResultOrThrow } from "@/lib/result-utils";
 import { ordersKeys, packagesKeys } from "@/lib/queryKeys";
 import { formatOrderPayerDisplay } from "@/lib/order-payer-display";
-import { isOrderPayer, ORDER_PAYERS } from "@/types/database";
+import { productStatusFieldDisplay } from "@/lib/order-shipped-display";
+import {
+  isOrderPayer,
+  ORDER_PAYERS,
+  type OrderProductStatus,
+} from "@/types/database";
 
 const ORDERS_PAGE_SIZE = 12;
 
@@ -71,6 +76,9 @@ function applyOrderRowPatch(
   }
   if (patch.productStatus !== undefined) {
     next.productStatus = patch.productStatus;
+    if (patch.productStatus === "已出貨") {
+      next.shippedAt = new Date().toISOString();
+    }
   }
   if (patch.packageNumber !== undefined) {
     next.packageNumber = patch.packageNumber.trim();
@@ -870,52 +878,60 @@ function OrdersPage() {
                       </Select>
                     </TableCell>
                     <TableCell>
-                      <Select
-                        disabled={order.productStatus === "已出貨"}
-                        value={order.productStatus}
-                        onValueChange={(value) => {
-                          if (order.productStatus === "已出貨") {
-                            setListFieldError("商品狀態已出貨後不可再修改");
-                            return;
-                          }
-                          if (
-                            value === "已出貨" &&
-                            order.paymentStatus !== "已入帳"
-                          ) {
-                            setListFieldError(
-                              "收款狀態尚未入帳，不能將商品狀態改為已出貨"
-                            );
-                            return;
-                          }
-                          if (
-                            value === "未購買" ||
-                            value === "已購買" ||
-                            value === "到虹家" ||
-                            value === "集運回台" ||
-                            value === "到台灣" ||
-                            value === "已出貨"
-                          ) {
-                            void persistListPatch(order.id, {
-                              productStatus: value,
-                            });
-                          }
-                        }}
-                      >
-                        <SelectTrigger
-                          className="h-8 w-32"
-                          aria-label="商品狀態"
+                      {order.productStatus === "已出貨" ? (
+                        <span
+                          className="text-sm tabular-nums text-muted-foreground"
+                          title="出貨時間"
                         >
-                          <SelectValue placeholder="商品狀態" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="未購買">未購買</SelectItem>
-                          <SelectItem value="已購買">已購買</SelectItem>
-                          <SelectItem value="到虹家">到虹家</SelectItem>
-                          <SelectItem value="集運回台">集運回台</SelectItem>
-                          <SelectItem value="到台灣">到台灣</SelectItem>
-                          <SelectItem value="已出貨">已出貨</SelectItem>
-                        </SelectContent>
-                      </Select>
+                          {productStatusFieldDisplay(
+                            order.productStatus,
+                            order.shippedAt,
+                          )}
+                        </span>
+                      ) : (
+                        <Select
+                          value={order.productStatus}
+                          onValueChange={(value) => {
+                            const status = value as OrderProductStatus | null;
+                            if (
+                              status === "已出貨" &&
+                              order.paymentStatus !== "已入帳"
+                            ) {
+                              setListFieldError(
+                                "收款狀態尚未入帳，不能將商品狀態改為已出貨",
+                              );
+                              return;
+                            }
+                            if (
+                              status === "未購買" ||
+                              status === "已購買" ||
+                              status === "到虹家" ||
+                              status === "集運回台" ||
+                              status === "到台灣" ||
+                              status === "已出貨"
+                            ) {
+                              void persistListPatch(order.id, {
+                                productStatus: status,
+                              });
+                            }
+                          }}
+                        >
+                          <SelectTrigger
+                            className="h-8 w-32"
+                            aria-label="商品狀態"
+                          >
+                            <SelectValue placeholder="商品狀態" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="未購買">未購買</SelectItem>
+                            <SelectItem value="已購買">已購買</SelectItem>
+                            <SelectItem value="到虹家">到虹家</SelectItem>
+                            <SelectItem value="集運回台">集運回台</SelectItem>
+                            <SelectItem value="到台灣">到台灣</SelectItem>
+                            <SelectItem value="已出貨">已出貨</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
                     </TableCell>
                     <TableCell>
                       <Select

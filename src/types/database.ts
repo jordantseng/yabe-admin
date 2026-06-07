@@ -70,6 +70,8 @@ export type OrderRow = {
   package_id: string | null;
   /** TW store-to-store / local address after arrival (per order). */
   domestic_delivery_address: string;
+  /** Set when product_status first becomes 已出貨. */
+  shipped_at: string | null;
   created_at: string;
   updated_at: string;
 };

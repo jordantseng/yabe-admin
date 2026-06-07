@@ -56,6 +56,7 @@ export type OrdersTableRow = {
   paymentStatus: OrderRecord["payment_status"];
   productStatus: OrderRecord["product_status"];
   packageNumber: string;
+  shippedAt: string | null;
 };
 
 export type OrderDetailFormValues = {
@@ -75,6 +76,7 @@ export type OrderDetailFormValues = {
   paymentStatus: string;
   productStatus: string;
   packageNumber: string;
+  shippedAt: string;
 };
 
 function purchaseDateFromRecord(value: string): string {
@@ -94,6 +96,10 @@ function normalizedOrderNumber(value: string | number | null | undefined): numbe
 function normalizedOrderQuantity(value: string | number | null | undefined): number {
   const n = typeof value === "string" ? Number.parseInt(value, 10) : Number(value);
   return Number.isFinite(n) ? Math.max(1, Math.trunc(n)) : 1;
+}
+
+function shippedAtIsoForNewShipment(): string {
+  return new Date().toISOString();
 }
 
 /** 收益 = 售價 − 成本 (matches DB generated column). */
@@ -133,6 +139,7 @@ export function orderRecordToTableRow(row: OrderRecord): OrdersTableRow {
     paymentStatus: row.payment_status,
     productStatus: row.product_status,
     packageNumber: row.package_number,
+    shippedAt: row.shipped_at ?? null,
   };
 }
 
@@ -154,6 +161,7 @@ export function orderRecordToDetailForm(row: OrderRecord): OrderDetailFormValues
     paymentStatus: row.payment_status,
     productStatus: row.product_status,
     packageNumber: row.package_number,
+    shippedAt: row.shipped_at ?? "",
   };
 }
 
@@ -261,6 +269,8 @@ export async function createOrder(
       payment_status: input.paymentStatus,
       product_status: input.productStatus,
       package_number: input.packageNumber,
+      shipped_at:
+        input.productStatus === "已出貨" ? shippedAtIsoForNewShipment() : null,
     })
     .select()
     .single();
@@ -496,6 +506,8 @@ export async function updateOrderFields(
     patch.payer !== undefined ||
     patch.paymentStatus !== undefined ||
     patch.packageNumber !== undefined;
+  let shippedAt: string | undefined;
+
   if (isLockedFieldPatch || needsProductStatusCheck || needsExistingStateCheck) {
     const { data: existing, error: existingError } = await supabase
       .from("orders")
@@ -519,12 +531,19 @@ export async function updateOrderFields(
         message: "收款狀態尚未入帳，不能將商品狀態改為已出貨",
       });
     }
+    if (
+      patch.productStatus === "已出貨" &&
+      existing?.product_status !== "已出貨"
+    ) {
+      shippedAt = shippedAtIsoForNewShipment();
+    }
   }
 
   const row: Record<string, string | null> = {};
   if (patch.payer !== undefined) row.payer = patch.payer;
   if (patch.paymentStatus !== undefined) row.payment_status = patch.paymentStatus;
   if (patch.productStatus !== undefined) row.product_status = patch.productStatus;
+  if (shippedAt !== undefined) row.shipped_at = shippedAt;
   if (patch.packageNumber !== undefined) {
     const packageNumber = patch.packageNumber.trim();
     row.package_number = packageNumber;
@@ -621,6 +640,9 @@ export async function updateOrderFromDetailForm(
     });
   }
 
+  const isNewlyShipped =
+    existing?.product_status !== "已出貨" && values.productStatus === "已出貨";
+
   const packageNumber = values.packageNumber.trim();
   let packageId: string | null = null;
   if (packageNumber !== "未指定") {
@@ -658,6 +680,7 @@ export async function updateOrderFromDetailForm(
       product_status: values.productStatus as OrderRecord["product_status"],
       package_number: packageNumber,
       package_id: packageId,
+      ...(isNewlyShipped ? { shipped_at: shippedAtIsoForNewShipment() } : {}),
     })
     .eq("id", orderId)
     .select()

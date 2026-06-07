@@ -1,5 +1,6 @@
-import { Controller, useFormContext } from "react-hook-form";
+import { Controller, useFormContext, useWatch } from "react-hook-form";
 import FormField from "@/components/FormField";
+import { productStatusFieldDisplay } from "@/lib/order-shipped-display";
 import type { OrderDetailFormValues } from "@/lib/orders";
 import {
   Select,
@@ -26,8 +27,10 @@ export default function OrderDetailStatusSection({
   const {
     control,
     getValues,
+    setValue,
     formState: { errors },
   } = useFormContext<OrderDetailFormValues>();
+  const watchedShippedAt = useWatch({ control, name: "shippedAt" });
 
   return (
     <>
@@ -76,40 +79,52 @@ export default function OrderDetailStatusSection({
           control={control}
           name="productStatus"
           rules={{ required: REQUIRED_MSG }}
-          render={({ field }) => (
-            <Select
-              disabled={fieldLock.fieldsDisabled}
-              value={field.value}
-              onValueChange={(value) => {
-                if (fieldLock.isShippedLocked) {
-                  onValidationMessage("商品狀態已出貨後不可再修改");
-                  return;
-                }
-                if (
-                  value === "已出貨" &&
-                  getValues("paymentStatus") !== "已入帳"
-                ) {
-                  onValidationMessage(
-                    "收款狀態尚未入帳，不能將商品狀態改為已出貨",
-                  );
-                  return;
-                }
-                if (value) field.onChange(value);
-              }}
-            >
-              <SelectTrigger className="w-full" aria-label="商品狀態">
-                <SelectValue placeholder="商品狀態" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="未購買">未購買</SelectItem>
-                <SelectItem value="已購買">已購買</SelectItem>
-                <SelectItem value="到虹家">到虹家</SelectItem>
-                <SelectItem value="集運回台">集運回台</SelectItem>
-                <SelectItem value="到台灣">到台灣</SelectItem>
-                <SelectItem value="已出貨">已出貨</SelectItem>
-              </SelectContent>
-            </Select>
-          )}
+          render={({ field }) =>
+            fieldLock.isShippedLocked ? (
+              <p
+                className="rounded-md border border-input bg-muted px-3 py-2 text-sm text-muted-foreground"
+                aria-label="商品狀態"
+              >
+                {productStatusFieldDisplay(field.value, watchedShippedAt)}
+              </p>
+            ) : (
+              <Select
+                disabled={fieldLock.fieldsDisabled}
+                value={field.value}
+                onValueChange={(value) => {
+                  if (
+                    value === "已出貨" &&
+                    getValues("paymentStatus") !== "已入帳"
+                  ) {
+                    onValidationMessage(
+                      "收款狀態尚未入帳，不能將商品狀態改為已出貨",
+                    );
+                    return;
+                  }
+                  if (value === "已出貨" && !getValues("shippedAt")) {
+                    setValue("shippedAt", new Date().toISOString(), {
+                      shouldDirty: false,
+                    });
+                  }
+                  if (value) field.onChange(value);
+                }}
+              >
+                <SelectTrigger className="w-full" aria-label="商品狀態">
+                  <SelectValue placeholder="商品狀態">
+                    {productStatusFieldDisplay(field.value, watchedShippedAt)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="未購買">未購買</SelectItem>
+                  <SelectItem value="已購買">已購買</SelectItem>
+                  <SelectItem value="到虹家">到虹家</SelectItem>
+                  <SelectItem value="集運回台">集運回台</SelectItem>
+                  <SelectItem value="到台灣">到台灣</SelectItem>
+                  <SelectItem value="已出貨">已出貨</SelectItem>
+                </SelectContent>
+              </Select>
+            )
+          }
         />
       </FormField>
     </>

@@ -47,5 +47,6 @@ export function emptyOrderDetailForm(): OrderDetailFormValues {
     paymentStatus: "未收款",
     productStatus: "未購買",
     packageNumber: "未指定",
+    shippedAt: "",
   };
 }

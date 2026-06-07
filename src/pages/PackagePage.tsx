@@ -71,6 +71,7 @@ import {
   type PackagePageEmptyPackageStub,
 } from "@/lib/orders";
 import { formatOrderPayerDisplay } from "@/lib/order-payer-display";
+import { productStatusFieldDisplay } from "@/lib/order-shipped-display";
 import type {
   OrderPayer,
   OrderPaymentStatus,
@@ -108,6 +109,7 @@ export type PackageTableRow = {
   revenue: string;
   paymentStatus: OrderPaymentStatus;
   productStatus: OrderProductStatus;
+  shippedAt: string | null;
 };
 
 function toNumber(value: string): number {
@@ -148,6 +150,7 @@ function orderToPackageTableRow(row: OrderWithPackageNumber): PackageTableRow {
     revenue: revenueStringFromCostPrice(row.cost, row.price),
     paymentStatus: row.payment_status,
     productStatus: row.product_status,
+    shippedAt: row.shipped_at ?? null,
   };
 }
 
@@ -238,6 +241,9 @@ function applyPackageRowPatch(
   }
   if (patch.productStatus !== undefined) {
     next.productStatus = patch.productStatus;
+    if (patch.productStatus === "已出貨") {
+      next.shippedAt = new Date().toISOString();
+    }
   }
   if (patch.packageNumber !== undefined) {
     next.packageNumber = patch.packageNumber.trim();
@@ -1564,30 +1570,40 @@ function PackagePage() {
                         {row.domesticShippingFee}
                       </TableCell>
                       <TableCell>
-                        <Select
-                          value={row.productStatus}
-                          disabled={
-                            row.packageSettled || row.productStatus === "已出貨"
-                          }
-                          onValueChange={(value) =>
-                            handleProductStatusChange(row.id, value)
-                          }
-                        >
-                          <SelectTrigger
-                            className="h-8 w-32"
-                            aria-label="商品狀態"
+                        {row.productStatus === "已出貨" ? (
+                          <span
+                            className="text-sm tabular-nums text-muted-foreground"
+                            title="出貨時間"
                           >
-                            <SelectValue placeholder="商品狀態" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="未購買">未購買</SelectItem>
-                            <SelectItem value="已購買">已購買</SelectItem>
-                            <SelectItem value="到虹家">到虹家</SelectItem>
-                            <SelectItem value="集運回台">集運回台</SelectItem>
-                            <SelectItem value="到台灣">到台灣</SelectItem>
-                            <SelectItem value="已出貨">已出貨</SelectItem>
-                          </SelectContent>
-                        </Select>
+                            {productStatusFieldDisplay(
+                              row.productStatus,
+                              row.shippedAt,
+                            )}
+                          </span>
+                        ) : (
+                          <Select
+                            value={row.productStatus}
+                            disabled={row.packageSettled}
+                            onValueChange={(value) =>
+                              handleProductStatusChange(row.id, value)
+                            }
+                          >
+                            <SelectTrigger
+                              className="h-8 w-32"
+                              aria-label="商品狀態"
+                            >
+                              <SelectValue placeholder="商品狀態" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="未購買">未購買</SelectItem>
+                              <SelectItem value="已購買">已購買</SelectItem>
+                              <SelectItem value="到虹家">到虹家</SelectItem>
+                              <SelectItem value="集運回台">集運回台</SelectItem>
+                              <SelectItem value="到台灣">到台灣</SelectItem>
+                              <SelectItem value="已出貨">已出貨</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        )}
                       </TableCell>
                       <TableCell
                         className="max-w-56 truncate text-sm text-muted-foreground"
