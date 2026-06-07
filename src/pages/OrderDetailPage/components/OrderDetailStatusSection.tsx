@@ -82,7 +82,7 @@ export default function OrderDetailStatusSection({
           render={({ field }) =>
             fieldLock.isShippedLocked ? (
               <p
-                className="rounded-md border border-input bg-muted px-3 py-2 text-sm text-muted-foreground"
+                className="flex h-8 items-center text-sm tabular-nums text-muted-foreground"
                 aria-label="商品狀態"
               >
                 {productStatusFieldDisplay(field.value, watchedShippedAt)}
