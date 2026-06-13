@@ -18,6 +18,7 @@ import { Link } from "react-router-dom";
 import Pagination from "@/components/Pagination";
 import SearchBar from "@/components/SearchBar";
 import Button from "@/components/ui/button";
+import { useSnackbar } from "@/components/ui/snackbar";
 import {
   Dialog,
   DialogClose,
@@ -118,6 +119,13 @@ export type PackageTableRow = {
 function toNumber(value: string): number {
   const n = Number.parseFloat(value);
   return Number.isNaN(n) ? 0 : n;
+}
+
+function paymentStatusTextClass(status: string): string {
+  if (status === "未收款") return "text-red-500";
+  if (status === "已收款") return "text-amber-500";
+  if (status === "已入帳") return "text-green-500";
+  return "";
 }
 
 function purchaseDateSlice(value: string): string {
@@ -372,7 +380,8 @@ function PackagePage() {
   const [draftFilterProductStatus, setDraftFilterProductStatus] =
     useState<PackageProductFilter>("全部");
   const [draftFilterPayer, setDraftFilterPayer] = useState<string>("全部");
-  const [rowFieldError, setRowFieldError] = useState<string | null>(null);
+  const { showSnackbar } = useSnackbar();
+  const lastRowsLoadErrorRef = useRef<string | null>(null);
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
   const [isBulkProductPopoverOpen, setIsBulkProductPopoverOpen] =
     useState(false);
@@ -385,12 +394,6 @@ function PackagePage() {
   const [editPackageFeeValue, setEditPackageFeeValue] = useState("0");
   const [editPackageNotesValue, setEditPackageNotesValue] = useState("");
   const [editPackageFeeError, setEditPackageFeeError] = useState<string | null>(
-    null
-  );
-  const [settlePackageError, setSettlePackageError] = useState<string | null>(
-    null
-  );
-  const [dismissedRowsError, setDismissedRowsError] = useState<string | null>(
     null
   );
   const [isSettlePackageDialogOpen, setIsSettlePackageDialogOpen] =
@@ -482,7 +485,7 @@ function PackagePage() {
           queryClient.setQueryData(key, data);
         }
       }
-      setRowFieldError(error.message);
+      showSnackbar(`更新失敗：${error.message}`, { variant: "error" });
     },
     onSuccess: async () => {
       await syncPackageRowsCache(queryClient, listUrlRef.current);
@@ -562,6 +565,29 @@ function PackagePage() {
   /** 換頁、篩選、搜尋時顯示 skeleton；欄位更新改以樂觀更新 + 手動 sync，不觸發列表 query 的 refetch */
   const rowsLoading = rowsQuery.isFetching;
   const rowsError = (rowsQuery.error as Error | null)?.message ?? null;
+
+  useEffect(() => {
+    if (!rowsError) {
+      lastRowsLoadErrorRef.current = null;
+      return;
+    }
+    if (lastRowsLoadErrorRef.current === rowsError) {
+      return;
+    }
+    lastRowsLoadErrorRef.current = rowsError;
+    showSnackbar(`無法載入包裹列表：${rowsError}`, {
+      variant: "error",
+      duration: 8000,
+      action: {
+        label: "重試",
+        onClick: () => {
+          lastRowsLoadErrorRef.current = null;
+          void rowsQuery.refetch();
+        },
+      },
+    });
+  }, [rowsError, rowsQuery.refetch, showSnackbar]);
+
   const hasOrderFilters =
     listUrl.q.trim() !== "" ||
     listUrl.product !== "全部" ||
@@ -638,17 +664,32 @@ function PackagePage() {
       return;
     }
     if (value) {
-      setRowFieldError(null);
-      void (async () => {
-        try {
-          await updateOrderFieldMutation.mutateAsync({
-            id,
-            patch: { packageNumber: value },
-          });
-        } catch (error) {
-          setRowFieldError((error as Error).message);
-        }
-      })();
+      void updateOrderFieldMutation.mutateAsync({
+        id,
+        patch: { packageNumber: value },
+      });
+    }
+  };
+
+  const handlePaymentStatusChange = (id: string, value: string | null) => {
+    const target = rows.find((row) => row.id === id);
+    if (!target) {
+      return;
+    }
+    if (target.packageSettled || target.productStatus === "已出貨") {
+      return;
+    }
+    if (
+      (value === "未收款" || value === "已收款" || value === "已入帳") &&
+      packageRowPatchIsNoOp(target, { paymentStatus: value })
+    ) {
+      return;
+    }
+    if (value === "未收款" || value === "已收款" || value === "已入帳") {
+      void updateOrderFieldMutation.mutateAsync({
+        id,
+        patch: { paymentStatus: value },
+      });
     }
   };
 
@@ -658,11 +699,13 @@ function PackagePage() {
       return;
     }
     if (target.packageSettled || target.productStatus === "已出貨") {
-      setRowFieldError("商品狀態已出貨後不可再修改");
+      showSnackbar("商品狀態已出貨後不可再修改", { variant: "error" });
       return;
     }
     if (value === "已出貨" && target.paymentStatus !== "已入帳") {
-      setRowFieldError("收款狀態尚未入帳，不能將商品狀態改為已出貨");
+      showSnackbar("收款狀態尚未入帳，不能將商品狀態改為已出貨", {
+        variant: "error",
+      });
       return;
     }
     if (
@@ -685,17 +728,10 @@ function PackagePage() {
       value === "到台灣" ||
       value === "已出貨"
     ) {
-      setRowFieldError(null);
-      void (async () => {
-        try {
-          await updateOrderFieldMutation.mutateAsync({
-            id,
-            patch: { productStatus: value },
-          });
-        } catch (error) {
-          setRowFieldError((error as Error).message);
-        }
-      })();
+      void updateOrderFieldMutation.mutateAsync({
+        id,
+        patch: { productStatus: value },
+      });
     }
   };
 
@@ -732,7 +768,6 @@ function PackagePage() {
     if (ids.length === 0) {
       return;
     }
-    setRowFieldError(null);
     const orderById = new Map(rows.map((row) => [row.id, row]));
     const lockedIds = ids.filter((id) => {
       const row = orderById.get(id);
@@ -748,9 +783,13 @@ function PackagePage() {
     );
     if (updatableIds.length === 0) {
       if (bulkProductStatus === "已出貨" && paymentBlockedIds.length > 0) {
-        setRowFieldError("收款狀態尚未入帳，不能批次改為已出貨");
+        showSnackbar("收款狀態尚未入帳，不能批次改為已出貨", {
+          variant: "error",
+        });
       } else {
-        setRowFieldError("已出貨或包裹已結清的訂單不能透過批次修改商品狀態");
+        showSnackbar("已出貨或包裹已結清的訂單不能透過批次修改商品狀態", {
+          variant: "error",
+        });
       }
       return;
     }
@@ -760,11 +799,10 @@ function PackagePage() {
     });
     if (needUpdateIds.length === 0) {
       if (lockedIds.length > 0 || paymentBlockedIds.length > 0) {
-        setRowFieldError(
+        showSnackbar(
           "部分訂單未變更商品狀態（已出貨、包裹已結清，或收款未入帳時不可改為已出貨）",
+          { variant: "warning" },
         );
-      } else {
-        setRowFieldError(null);
       }
       const skippedIds = Array.from(
         new Set([...lockedIds, ...paymentBlockedIds]),
@@ -780,13 +818,16 @@ function PackagePage() {
       bulkProductStatus,
     );
     if (bulkResult.ok === false) {
-      setRowFieldError(bulkResult.message);
+      showSnackbar(`更新失敗：${bulkResult.message}`, { variant: "error" });
       return;
     }
     if (lockedIds.length > 0 || paymentBlockedIds.length > 0) {
-      setRowFieldError(
-        "部分訂單未變更商品狀態（已出貨、包裹已結清，或收款未入帳時不可改為已出貨）"
+      showSnackbar(
+        "部分訂單未變更商品狀態（已出貨、包裹已結清，或收款未入帳時不可改為已出貨）",
+        { variant: "warning" },
       );
+    } else {
+      showSnackbar("已批次更新商品狀態", { variant: "success" });
     }
     const skippedIds = Array.from(new Set([...lockedIds, ...paymentBlockedIds]));
     setSelectedOrderIds(skippedIds);
@@ -809,6 +850,7 @@ function PackagePage() {
     setNewPackageNotes("");
     setNewPackageInternationalShippingFee("0");
     setIsCreatePackageDialogOpen(false);
+    showSnackbar("包裹已建立", { variant: "success" });
   };
 
   const handleFilterPopoverOpenChange = (open: boolean) => {
@@ -831,17 +873,18 @@ function PackagePage() {
   };
 
   const settlePackage = async (pkg: string): Promise<boolean> => {
-    setSettlePackageError(null);
     try {
       await settlePackageMutation.mutateAsync(pkg);
+      showSnackbar(`包裹 ${pkg} 已結清`, { variant: "success" });
       return true;
     } catch (error) {
-      setSettlePackageError((error as Error).message);
+      showSnackbar(`包裹結清失敗：${(error as Error).message}`, {
+        variant: "error",
+      });
       return false;
     }
   };
   const openSettlePackageDialog = (pkg: string) => {
-    setSettlePackageError(null);
     setPackageToSettle(pkg);
     setIsSettlePackageDialogOpen(true);
   };
@@ -889,6 +932,7 @@ function PackagePage() {
       setEditPackageFeeError((error as Error).message);
       return;
     }
+    showSnackbar(`包裹 ${packageToEditFee} 已更新`, { variant: "success" });
     setPackageToEditFee(null);
     setIsEditPackageFeeDialogOpen(false);
   };
@@ -1218,63 +1262,8 @@ function PackagePage() {
         )}
       </div>
 
-      {rowsError && dismissedRowsError !== rowsError && (
-        <div
-          className="mb-4 flex items-start justify-between gap-2 text-sm text-destructive"
-          role="alert"
-        >
-          <p>{rowsError}</p>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-destructive"
-            onClick={() => setDismissedRowsError(rowsError)}
-            aria-label="關閉錯誤訊息"
-          >
-            <XIcon className="h-4 w-4" />
-          </Button>
-        </div>
-      )}
-      {rowFieldError && (
-        <div
-          className="mb-4 flex items-start justify-between gap-2 text-sm text-destructive"
-          role="alert"
-        >
-          <p>商品狀態更新失敗：{rowFieldError}</p>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-destructive"
-            onClick={() => setRowFieldError(null)}
-            aria-label="關閉錯誤訊息"
-          >
-            <XIcon className="h-4 w-4" />
-          </Button>
-        </div>
-      )}
-      {settlePackageError && (
-        <div
-          className="mb-4 flex items-start justify-between gap-2 text-sm text-destructive"
-          role="alert"
-        >
-          <p>包裹結清失敗：{settlePackageError}</p>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="h-7 px-2 text-destructive"
-            onClick={() => setSettlePackageError(null)}
-            aria-label="關閉錯誤訊息"
-          >
-            <XIcon className="h-4 w-4" />
-          </Button>
-        </div>
-      )}
-
       <div className="overflow-x-auto">
-        <Table className="min-w-[1300px]">
+        <Table className="min-w-[1400px]">
           <TableHeader>
             <TableRow>
               <TableHead className="w-10">
@@ -1304,6 +1293,7 @@ function PackagePage() {
               <TableHead className="text-right">售價</TableHead>
               <TableHead className="text-right">收益</TableHead>
               <TableHead className="text-right">運費</TableHead>
+              <TableHead>收款狀態</TableHead>
               <TableHead>商品狀態</TableHead>
               <TableHead className="min-w-48">備註</TableHead>
               <TableHead className="w-[88px]">詳細</TableHead>
@@ -1359,6 +1349,9 @@ function PackagePage() {
                     <Skeleton className="h-8 w-28" />
                   </TableCell>
                   <TableCell>
+                    <Skeleton className="h-8 w-28" />
+                  </TableCell>
+                  <TableCell>
                     <Skeleton className="h-4 w-40" />
                   </TableCell>
                   <TableCell>
@@ -1369,16 +1362,16 @@ function PackagePage() {
             ) : rowsError ? (
               <TableRow>
                 <TableCell
-                  colSpan={17}
+                  colSpan={18}
                   className="h-24 text-center text-sm text-muted-foreground"
                 >
-                  無法載入列表，請見上方錯誤說明。
+                  無法載入列表。
                 </TableCell>
               </TableRow>
             ) : groupedRows.length === 0 ? (
               <TableRow>
                 <TableCell
-                  colSpan={17}
+                  colSpan={18}
                   className="h-24 text-center text-sm text-muted-foreground"
                 >
                   {listUrl.q.trim() !== ""
@@ -1410,7 +1403,7 @@ function PackagePage() {
                 <Fragment key={group.label}>
                   <TableRow className="bg-muted/60 hover:bg-muted/60">
                     <TableCell
-                      colSpan={16}
+                      colSpan={17}
                       className="py-3 text-sm font-semibold tracking-tight"
                     >
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -1485,7 +1478,7 @@ function PackagePage() {
                   {group.rows.length === 0 ? (
                     <TableRow>
                       <TableCell
-                        colSpan={17}
+                        colSpan={18}
                         className="py-4 text-center text-sm text-muted-foreground"
                       >
                         {hasOrderFilters
@@ -1576,6 +1569,37 @@ function PackagePage() {
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {row.domesticShippingFee}
+                      </TableCell>
+                      <TableCell>
+                        <Select
+                          value={row.paymentStatus}
+                          disabled={
+                            row.packageSettled || row.productStatus === "已出貨"
+                          }
+                          onValueChange={(value) =>
+                            handlePaymentStatusChange(row.id, value)
+                          }
+                        >
+                          <SelectTrigger
+                            className={`h-8 w-28 ${paymentStatusTextClass(
+                              row.paymentStatus,
+                            )}`}
+                            aria-label="收款狀態"
+                          >
+                            <SelectValue placeholder="收款狀態" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="未收款" className="text-red-500">
+                              未收款
+                            </SelectItem>
+                            <SelectItem value="已收款" className="text-amber-500">
+                              已收款
+                            </SelectItem>
+                            <SelectItem value="已入帳" className="text-green-500">
+                              已入帳
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
                       </TableCell>
                       <TableCell>
                         {row.productStatus === "已出貨" ? (
@@ -1707,24 +1731,6 @@ function PackagePage() {
               確定要將包裹編號 {packageToSettle ?? "-"} 標記為已結清嗎？
             </DialogDescription>
           </DialogHeader>
-          {settlePackageError && (
-            <div
-              className="flex items-start justify-between gap-2 text-sm text-destructive"
-              role="alert"
-            >
-              <p>{settlePackageError}</p>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 px-2 text-destructive"
-                onClick={() => setSettlePackageError(null)}
-                aria-label="關閉錯誤訊息"
-              >
-                <XIcon className="h-4 w-4" />
-              </Button>
-            </div>
-          )}
           <DialogFooter>
             <DialogClose render={<Button variant="outline">取消</Button>} />
             <Button

@@ -1,4 +1,6 @@
+import { useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useSnackbar } from "@/components/ui/snackbar";
 import Skeleton from "@/components/ui/skeleton";
 import { fetchOrdersTotals } from "@/lib/orders";
 import { type OrdersListUrlState } from "@/lib/orders-list-url";
@@ -10,6 +12,8 @@ type OrdersTotalsSummaryProps = {
 };
 
 export default function OrdersTotalsSummary({ listUrl }: OrdersTotalsSummaryProps) {
+  const { showSnackbar } = useSnackbar();
+  const lastTotalsLoadErrorRef = useRef<string | null>(null);
   const totalsQuery = useQuery({
     queryKey: ordersKeys.totalsForList(listUrl),
     queryFn: async () => {
@@ -25,6 +29,30 @@ export default function OrdersTotalsSummary({ listUrl }: OrdersTotalsSummaryProp
     },
     placeholderData: (previousData) => previousData,
   });
+
+  const totalsError = (totalsQuery.error as Error | null)?.message ?? null;
+
+  useEffect(() => {
+    if (!totalsError) {
+      lastTotalsLoadErrorRef.current = null;
+      return;
+    }
+    if (lastTotalsLoadErrorRef.current === totalsError) {
+      return;
+    }
+    lastTotalsLoadErrorRef.current = totalsError;
+    showSnackbar(`無法載入總成本/總收益：${totalsError}`, {
+      variant: "error",
+      duration: 8000,
+      action: {
+        label: "重試",
+        onClick: () => {
+          lastTotalsLoadErrorRef.current = null;
+          void totalsQuery.refetch();
+        },
+      },
+    });
+  }, [totalsError, showSnackbar, totalsQuery.refetch]);
 
   const loading = totalsQuery.isFetching || totalsQuery.isLoading;
   if (loading) {
@@ -44,8 +72,8 @@ export default function OrdersTotalsSummary({ listUrl }: OrdersTotalsSummaryProp
 
   if (totalsQuery.error) {
     return (
-      <div className="flex flex-wrap items-center gap-4 text-sm text-destructive">
-        無法載入總成本/總收益
+      <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+        總成本/總收益暫無法顯示
       </div>
     );
   }

@@ -5,7 +5,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { ArrowUpDownIcon, EyeIcon, Trash2Icon, XIcon } from "lucide-react";
+import { ArrowUpDownIcon, EyeIcon, Trash2Icon } from "lucide-react";
 import { useQueryStates } from "nuqs";
 import { Link } from "react-router-dom";
 import CreateOrderDialog from "@/pages/OrdersPage/components/CreateOrderDialog";
@@ -14,7 +14,7 @@ import DeleteOrderDialog from "@/pages/OrdersPage/components/DeleteOrderDialog";
 import OrdersActiveFiltersChips from "@/pages/OrdersPage/components/OrdersActiveFiltersChips";
 import Pagination from "@/components/Pagination";
 import SearchBar from "@/components/SearchBar";
-import Button from "@/components/ui/button";
+import { useSnackbar } from "@/components/ui/snackbar";
 import Skeleton from "@/components/ui/skeleton";
 import OrdersFiltersPopover from "@/pages/OrdersPage/components/OrdersFiltersPopover";
 import OrdersBulkActionPopover, {
@@ -199,11 +199,9 @@ function OrdersPage() {
   useEffect(() => {
     listUrlRef.current = listUrl;
   }, [listUrl]);
-  const [listFieldError, setListFieldError] = useState<string | null>(null);
   const [deleteOrderError, setDeleteOrderError] = useState<string | null>(null);
-  const [dismissedOrdersError, setDismissedOrdersError] = useState<
-    string | null
-  >(null);
+  const { showSnackbar } = useSnackbar();
+  const lastOrdersLoadErrorRef = useRef<string | null>(null);
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
   const queryClient = useQueryClient();
   // Search input is owned by `SearchBar`.
@@ -285,7 +283,7 @@ function OrdersPage() {
           queryClient.setQueryData(key, data);
         }
       }
-      setListFieldError(error.message);
+      showSnackbar(`更新失敗：${error.message}`, { variant: "error" });
     },
     onSuccess: async () => {
       await syncOrdersListViewCache(queryClient, listUrlRef.current);
@@ -298,6 +296,7 @@ function OrdersPage() {
     },
     onSuccess: () => {
       invalidateOrdersData();
+      showSnackbar("訂單已刪除", { variant: "success" });
     },
     onError: (error) => {
       setDeleteOrderError(error.message);
@@ -312,7 +311,6 @@ function OrdersPage() {
     if (order && patchHasNoEffectiveChange(order, patch)) {
       return;
     }
-    setListFieldError(null);
     await persistFieldMutation.mutateAsync({ orderId, patch });
   };
 
@@ -356,6 +354,28 @@ function OrdersPage() {
   /** 換頁、篩選、搜尋或資料重抓時顯示 skeleton（含 isLoading 的首次載入） */
   const ordersLoading = ordersQuery.isFetching || ordersQuery.isLoading;
   const ordersError = (ordersQuery.error as Error | null)?.message ?? null;
+
+  useEffect(() => {
+    if (!ordersError) {
+      lastOrdersLoadErrorRef.current = null;
+      return;
+    }
+    if (lastOrdersLoadErrorRef.current === ordersError) {
+      return;
+    }
+    lastOrdersLoadErrorRef.current = ordersError;
+    showSnackbar(`無法載入訂單：${ordersError}`, {
+      variant: "error",
+      duration: 8000,
+      action: {
+        label: "重試",
+        onClick: () => {
+          lastOrdersLoadErrorRef.current = null;
+          invalidateOrdersData();
+        },
+      },
+    });
+  }, [ordersError, showSnackbar]);
 
   const totalPages = Math.max(1, Math.ceil(totalRowCount / ORDERS_PAGE_SIZE));
   const safeCurrentPage = Math.min(listUrl.page, totalPages);
@@ -408,14 +428,13 @@ function OrdersPage() {
     if (ids.length === 0) {
       return;
     }
-    setListFieldError(null);
     const orderById = new Map(orders.map((order) => [order.id, order]));
     const lockedIds = ids.filter(
       (id) => orderById.get(id)?.productStatus === "已出貨"
     );
     const eligibleIds = ids.filter((id) => !lockedIds.includes(id));
     if (eligibleIds.length === 0) {
-      setListFieldError("已出貨訂單不能透過批次指定包裹編號");
+      showSnackbar("已出貨訂單不能透過批次指定包裹編號", { variant: "error" });
       return;
     }
     const trimmedPkg = bulkPackageNumber.trim();
@@ -424,7 +443,6 @@ function OrdersPage() {
       return row != null && row.packageNumber !== trimmedPkg;
     });
     if (needUpdateIds.length === 0) {
-      setListFieldError(null);
       setSelectedOrderIds(lockedIds);
       return;
     }
@@ -440,11 +458,15 @@ function OrdersPage() {
       }
     );
     if (bulkResult.ok === false) {
-      setListFieldError(bulkResult.message);
+      showSnackbar(`更新失敗：${bulkResult.message}`, { variant: "error" });
       return;
     }
     if (lockedIds.length > 0) {
-      setListFieldError("部分已出貨訂單未變更包裹編號（已自動略過）");
+      showSnackbar("部分已出貨訂單未變更包裹編號（已自動略過）", {
+        variant: "warning",
+      });
+    } else {
+      showSnackbar("已批次更新包裹編號", { variant: "success" });
     }
     setSelectedOrderIds(lockedIds);
   };
@@ -455,14 +477,13 @@ function OrdersPage() {
     if (ids.length === 0) {
       return;
     }
-    setListFieldError(null);
     const orderById = new Map(orders.map((order) => [order.id, order]));
     const lockedIds = ids.filter(
       (id) => orderById.get(id)?.productStatus === "已出貨"
     );
     const eligibleIds = ids.filter((id) => !lockedIds.includes(id));
     if (eligibleIds.length === 0) {
-      setListFieldError("已出貨訂單不能透過批次修改收款狀態");
+      showSnackbar("已出貨訂單不能透過批次修改收款狀態", { variant: "error" });
       return;
     }
     const needUpdateIds = eligibleIds.filter((id) => {
@@ -470,7 +491,6 @@ function OrdersPage() {
       return row != null && row.paymentStatus !== bulkPaymentStatus;
     });
     if (needUpdateIds.length === 0) {
-      setListFieldError(null);
       setSelectedOrderIds(lockedIds);
       return;
     }
@@ -486,11 +506,15 @@ function OrdersPage() {
       }
     );
     if (bulkResult.ok === false) {
-      setListFieldError(bulkResult.message);
+      showSnackbar(`更新失敗：${bulkResult.message}`, { variant: "error" });
       return;
     }
     if (lockedIds.length > 0) {
-      setListFieldError("部分已出貨訂單未變更收款狀態（已自動略過）");
+      showSnackbar("部分已出貨訂單未變更收款狀態（已自動略過）", {
+        variant: "warning",
+      });
+    } else {
+      showSnackbar("已批次更新收款狀態", { variant: "success" });
     }
     setSelectedOrderIds(lockedIds);
   };
@@ -501,7 +525,6 @@ function OrdersPage() {
     if (ids.length === 0) {
       return;
     }
-    setListFieldError(null);
     const orderById = new Map(orders.map((order) => [order.id, order]));
     const lockedIds = ids.filter(
       (id) => orderById.get(id)?.productStatus === "已出貨"
@@ -516,9 +539,13 @@ function OrdersPage() {
     );
     if (updatableIds.length === 0) {
       if (bulkProductStatus === "已出貨" && paymentBlockedIds.length > 0) {
-        setListFieldError("收款狀態尚未入帳，不能批次改為已出貨");
+        showSnackbar("收款狀態尚未入帳，不能批次改為已出貨", {
+          variant: "error",
+        });
       } else {
-        setListFieldError("已出貨訂單不能透過批次修改商品狀態");
+        showSnackbar("已出貨訂單不能透過批次修改商品狀態", {
+          variant: "error",
+        });
       }
       return;
     }
@@ -528,11 +555,10 @@ function OrdersPage() {
     });
     if (needUpdateIds.length === 0) {
       if (lockedIds.length > 0 || paymentBlockedIds.length > 0) {
-        setListFieldError(
-          "部分訂單未變更商品狀態（已出貨或收款未入帳時不可改為已出貨）"
+        showSnackbar(
+          "部分訂單未變更商品狀態（已出貨或收款未入帳時不可改為已出貨）",
+          { variant: "warning" },
         );
-      } else {
-        setListFieldError(null);
       }
       const skippedIds = Array.from(
         new Set([...lockedIds, ...paymentBlockedIds])
@@ -552,13 +578,16 @@ function OrdersPage() {
       }
     );
     if (bulkResult.ok === false) {
-      setListFieldError(bulkResult.message);
+      showSnackbar(`更新失敗：${bulkResult.message}`, { variant: "error" });
       return;
     }
     if (lockedIds.length > 0 || paymentBlockedIds.length > 0) {
-      setListFieldError(
-        "部分訂單未變更商品狀態（已出貨或收款未入帳時不可改為已出貨）"
+      showSnackbar(
+        "部分訂單未變更商品狀態（已出貨或收款未入帳時不可改為已出貨）",
+        { variant: "warning" },
       );
+    } else {
+      showSnackbar("已批次更新商品狀態", { variant: "success" });
     }
     const skippedIds = Array.from(
       new Set([...lockedIds, ...paymentBlockedIds])
@@ -582,61 +611,6 @@ function OrdersPage() {
 
   return (
     <main style={{ padding: "2rem", fontFamily: "system-ui, sans-serif" }}>
-      {ordersError && dismissedOrdersError !== ordersError && (
-        <div
-          className="mb-4 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          role="alert"
-        >
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <p className="font-medium">無法載入訂單</p>
-              <p className="mt-1 text-destructive/90">{ordersError}</p>
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2 text-destructive"
-              onClick={() => setDismissedOrdersError(ordersError)}
-              aria-label="關閉錯誤訊息"
-            >
-              <XIcon className="h-4 w-4" />
-            </Button>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="mt-2"
-            onClick={() => invalidateOrdersData()}
-          >
-            重試
-          </Button>
-        </div>
-      )}
-      {listFieldError && (
-        <div
-          className="mb-4 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-          role="alert"
-        >
-          <div className="flex items-start justify-between gap-2">
-            <div>
-              <p className="font-medium">更新失敗</p>
-              <p className="mt-1 text-destructive/90">{listFieldError}</p>
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 px-2 text-destructive"
-              onClick={() => setListFieldError(null)}
-              aria-label="關閉錯誤訊息"
-            >
-              <XIcon className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      )}
       <div className="mb-4 flex items-center justify-between gap-2">
         <h1 className="text-xl font-semibold">訂單管理</h1>
         <div className="flex items-center gap-2">
@@ -897,8 +871,9 @@ function OrdersPage() {
                               status === "已出貨" &&
                               order.paymentStatus !== "已入帳"
                             ) {
-                              setListFieldError(
+                              showSnackbar(
                                 "收款狀態尚未入帳，不能將商品狀態改為已出貨",
+                                { variant: "error" },
                               );
                               return;
                             }

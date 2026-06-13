@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Controller, useForm } from "react-hook-form";
 import Button from "@/components/ui/button";
+import { useSnackbar } from "@/components/ui/snackbar";
 import FormField from "@/components/FormField";
 import { cn } from "@/lib/utils";
 import {
@@ -88,6 +89,7 @@ export default function CreateOrderDialog({
   onOpenChange,
 }: CreateOrderDialogProps) {
   const queryClient = useQueryClient();
+  const { showSnackbar } = useSnackbar();
   const [createOrderError, setCreateOrderError] = useState<string | null>(null);
   const packageNumbersQuery = useQuery({
     queryKey: packagesKeys.numbers(),
@@ -103,6 +105,7 @@ export default function CreateOrderDialog({
       queryClient.invalidateQueries({ queryKey: ordersKeys.lists() });
       queryClient.invalidateQueries({ queryKey: ordersKeys.totals() });
       onOpenChange(false);
+      showSnackbar("訂單已建立", { variant: "success" });
     },
     onError: (error) => {
       setCreateOrderError(error.message);

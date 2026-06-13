@@ -11,6 +11,7 @@ import {
 import { fetchPackageNumbersFromDb } from "@/lib/packages";
 import { unwrapResultOrThrow } from "@/lib/result-utils";
 import { ordersKeys, packagesKeys } from "@/lib/queryKeys";
+import { useSnackbar } from "@/components/ui/snackbar";
 import { emptyOrderDetailForm, buildOrderDetailFieldLock } from "./constants";
 import OrderDetailAmountSection from "./components/OrderDetailAmountSection";
 import OrderDetailFormFooter from "./components/OrderDetailFormFooter";
@@ -26,8 +27,8 @@ function OrderDetailPage() {
   const navigate = useNavigate();
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
-  const [saveError, setSaveError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const { showSnackbar } = useSnackbar();
   const [isPersistedShippedLocked, setIsPersistedShippedLocked] =
     useState(false);
 
@@ -118,12 +119,11 @@ function OrderDetailPage() {
     if (!orderId) {
       return;
     }
-    setSaveError(null);
     setIsSaving(true);
     const updateRes = await updateOrderFromDetailForm(orderId, values);
     setIsSaving(false);
     if (updateRes.isErr()) {
-      setSaveError(updateRes.error.message);
+      showSnackbar(`更新失敗：${updateRes.error.message}`, { variant: "error" });
       return;
     }
     const data = updateRes.value;
@@ -133,6 +133,7 @@ function OrderDetailPage() {
     queryClient.invalidateQueries({ queryKey: ordersKeys.lists() });
     queryClient.invalidateQueries({ queryKey: ordersKeys.totals() });
     queryClient.invalidateQueries({ queryKey: packagesKeys.pageRows() });
+    showSnackbar("訂單已更新", { variant: "success" });
     if (window.history.length > 1) {
       navigate(-1);
     } else {
@@ -165,12 +166,12 @@ function OrderDetailPage() {
               <OrderDetailAmountSection fieldLock={fieldLock} />
               <OrderDetailStatusSection
                 fieldLock={fieldLock}
-                onValidationMessage={setSaveError}
+                onValidationMessage={(message) =>
+                  showSnackbar(message, { variant: "error" })
+                }
               />
             </fieldset>
             <OrderDetailFormFooter
-              saveError={saveError}
-              onDismissSaveError={() => setSaveError(null)}
               fieldLock={fieldLock}
               isSaving={isSaving}
             />

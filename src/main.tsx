@@ -8,6 +8,7 @@ import { captureInvitePendingPasswordSetup } from "@/lib/auth-password-setup";
 import { supabase } from "@/lib/supabase";
 import "./index.css";
 import App from "./App.tsx";
+import { SnackbarProvider } from "@/components/ui/snackbar";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -46,7 +47,9 @@ async function bootstrap() {
         <BrowserRouter>
           <NuqsAdapter>
             <AuthProvider>
-              <App />
+              <SnackbarProvider>
+                <App />
+              </SnackbarProvider>
             </AuthProvider>
           </NuqsAdapter>
         </BrowserRouter>
